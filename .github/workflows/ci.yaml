@@ -33,7 +33,7 @@ jobs:
         run: node --test scripts/verify-persistence.test.mjs
       - name: Build portal
         working-directory: frontend
-        run: npm ci && npm run build
+        run: npm ci && npm test && npm run build
       - name: Test browser Agent and CLI
         run: |
           npm ci --prefix agent
