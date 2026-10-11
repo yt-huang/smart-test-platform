@@ -1,18 +1,18 @@
 import WebSocket from 'ws';
-import { executeAssignment } from './executor.js';
+import { executeTask } from './task-executor.js';
 import { discoverTargets } from './targets.js';
 import { uploadEvidence } from './platform.js';
 
 export class AgentClient {
-  constructor(config, key, { execute = executeAssignment, discover = discoverTargets, log = console.log, socketFactory = url => new WebSocket(url, { maxPayload: 2 * 1024 * 1024, handshakeTimeout: 15000 }) } = {}) {
+  constructor(config, key, { execute = executeTask, discover = discoverTargets, log = console.log, socketFactory = url => new WebSocket(url, { maxPayload: 2 * 1024 * 1024, handshakeTimeout: 15000 }) } = {}) {
     Object.assign(this, { config, key, execute, discover, log, socketFactory });
-    this.active = new Map(); this.completed = new Map(); this.targets = [];
+    this.active = new Map(); this.completed = new Map(); this.targets = []; this.quarantined = new Set();
     this.stopped = false; this.registered = false; this.reconnectAttempt = 0;
   }
 
   async start() {
     this.targets = await this.discover(this.config, this.log);
-    if (!this.targets.some(target => target.platform === 'web' && target.cleanupOk)) throw new Error('No usable browser: run npm run install:browser or use the pinned Playwright container');
+    if (!this.targets.some(target => target.status === 'IDLE' && target.cleanupOk)) throw new Error('No usable target: install a browser or connect and configure an actual Android/Appium device');
     this.connect();
   }
 
@@ -51,6 +51,7 @@ export class AgentClient {
     await Promise.allSettled([...this.active.values()].map(task => task.promise));
     if (this.stopped) return;
     this.targets = await this.discover(this.config, this.log);
+    for (const target of this.targets) if (this.quarantined.has(target.id)) { target.status = 'MAINTENANCE'; target.cleanupOk = false; }
     this.scheduleReconnect();
   }
 
@@ -105,6 +106,7 @@ export class AgentClient {
       results: assignment.cases.map(testCase => ({ caseId: testCase.id, name: testCase.name, status: 'FAILED', durationMs: 0, error: error.message, steps: [], evidence: [] })), logs: [error.message]
     })).then(done => {
       target.status = done.cleanupOk ? 'IDLE' : 'MAINTENANCE'; target.cleanupOk = done.cleanupOk === true;
+      if (!done.cleanupOk) this.quarantined.add(target.id);
       this.active.delete(assignment.taskId); this.remember(done);
       this.send(done, socket);
       this.log(`Task ${assignment.taskId}: ${done.status}; cleanup ${done.cleanupOk ? 'verified' : 'failed'}`);

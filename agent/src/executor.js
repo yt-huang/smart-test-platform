@@ -1,15 +1,15 @@
 import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { lookup } from 'node:dns/promises';
-import { browserTypes } from './targets.js';
+import { browserTypes } from './browsers.js';
 
 const actions = new Set(['goto', 'click', 'fill', 'expectText', 'expectVisible', 'screenshot']);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const message = error => error?.message || String(error);
 
-export function validateCase(testCase) {
+export function validateCase(testCase, expected = { platform: 'web', framework: 'playwright' }) {
   if (!testCase || typeof testCase.id !== 'string' || typeof testCase.name !== 'string') throw new Error('Case requires id and name');
-  if (testCase.platform !== 'web' || testCase.framework !== 'playwright') throw new Error(`Unsupported execution: ${testCase.platform}/${testCase.framework}; mobile requires a real configured executor`);
+  if (testCase.platform !== expected.platform || testCase.framework !== expected.framework) throw new Error(`Unsupported execution: ${testCase.platform}/${testCase.framework}; target requires ${expected.platform}/${expected.framework}`);
   if (testCase.status !== 'APPROVED') throw new Error('Only human-approved cases may execute');
   if (!Array.isArray(testCase.steps) || !testCase.steps.length || testCase.steps.length > 500) throw new Error('Case requires 1-500 structured steps');
   for (const step of testCase.steps) {
@@ -148,6 +148,9 @@ export async function executeAssignment({ assignment, target, config, signal, up
     controller.signal.removeEventListener('abort', interrupt);
   }
   let uploadsOk = true;
+  if (!cleanupOk && results.length) {
+    const last = results.at(-1); last.status = 'FAILED'; last.error = `${last.error ? `${last.error}; ` : ''}Browser resource cleanup failed; target quarantined`;
+  }
   if (directory) {
     const logFile = path.join(directory, 'execution.log');
     await writeFile(logFile, logs.join('\n'), 'utf8');

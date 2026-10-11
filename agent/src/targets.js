@@ -1,9 +1,9 @@
-import { chromium, firefox, webkit } from 'playwright';
+import { browserTypes } from './browsers.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import os from 'node:os';
+import { probeAndroidTarget } from './appium.js';
 
-export const browserTypes = { chromium, firefox, webkit };
 const exec = promisify(execFile);
 
 export async function discoverTargets(config, log = console.log) {
@@ -30,10 +30,14 @@ export async function discoverTargets(config, log = console.log) {
         const [serial, state] = line.trim().split(/\s+/);
         if (!serial || state !== 'device') continue;
         const get = async key => (await exec('adb', ['-s', serial, 'shell', 'getprop', key], { timeout: 5000 })).stdout.trim();
-        targets.push({ id: `${config.agentId}-adb-${serial}`, name: serial, platform: 'android',
-          version: await get('ro.build.version.release'), browser: '', brand: await get('ro.product.brand'),
+        const target = { id: `${config.agentId}-adb-${serial}`, serial, name: serial, platform: 'android',
+          version: await get('ro.build.version.release'), browser: config.androidBrowser || '', brand: await get('ro.product.brand'),
           model: await get('ro.product.model'), provider: 'local', tags: [...config.tags, 'enumeration-only'],
-          status: 'MAINTENANCE', cleanupOk: false });
+          status: 'MAINTENANCE', cleanupOk: false };
+        if (config.appiumUrl && await probeAndroidTarget(config, target)) {
+          target.status = 'IDLE'; target.cleanupOk = true; target.tags = [...config.tags, 'appium'];
+        } else log(`Android ${serial} is unavailable for execution: configure and verify Appium + test application`);
+        targets.push(target);
       }
     } catch (error) { log(`ADB enumeration unavailable: ${error.message.split('\n')[0]}`); }
   }

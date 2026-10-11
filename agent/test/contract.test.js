@@ -71,6 +71,10 @@ test('platform cancellation interrupts the task, failed cleanup quarantines the 
   client.handle(assignment); await tick(); client.handle({ type: 'cancel', taskId: 't1', reason: 'run cancelled' }); await tick();
   assert.equal(client.targets[0].status, 'MAINTENANCE'); assert.equal(client.targets[0].cleanupOk, false);
   assert.equal(client.socket.messages.at(-1).cleanupOk, false);
+  client.discover = async () => [{ id: 'target', platform: 'web', browser: 'chromium', status: 'IDLE', cleanupOk: true }];
+  client.scheduleReconnect = () => {};
+  await client.reconnectAfterCleanup();
+  assert.equal(client.targets[0].status, 'MAINTENANCE'); assert.equal(client.targets[0].cleanupOk, false);
   await client.stop();
 });
 test('concurrent assignments cannot share a leased browser', async () => {

@@ -16,6 +16,17 @@ export function readConfig(env = process.env) {
   if (!browsers.length || browsers.some(b => !['chromium', 'firefox', 'webkit'].includes(b))) throw new Error('AGENT_BROWSERS supports chromium,firefox,webkit');
   const wsUrl = new URL(`${platformUrl}/ws/agent`);
   wsUrl.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  let appiumUrl;
+  if (env.APPIUM_URL) {
+    const value = new URL(env.APPIUM_URL);
+    if (!['http:', 'https:'].includes(value.protocol) || value.username || value.password || value.search || value.hash) throw new Error('APPIUM_URL must be an HTTP(S) endpoint without embedded credentials');
+    appiumUrl = value.toString().replace(/\/$/, '');
+  }
+  const androidPackage = env.AGENT_ANDROID_APP_PACKAGE;
+  const androidActivity = env.AGENT_ANDROID_APP_ACTIVITY;
+  if (androidPackage && !/^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)+$/.test(androidPackage)) throw new Error('Invalid AGENT_ANDROID_APP_PACKAGE');
+  if (androidActivity && !/^[a-zA-Z0-9_.$]+$/.test(androidActivity)) throw new Error('Invalid AGENT_ANDROID_APP_ACTIVITY');
+  if (env.AGENT_ANDROID_BROWSER && env.AGENT_ANDROID_BROWSER !== 'Chrome') throw new Error('AGENT_ANDROID_BROWSER currently supports Chrome only');
   return {
     platformUrl, wsUrl: wsUrl.toString(), agentId, hostFingerprint: fingerprint,
     name: env.AGENT_NAME || `${os.hostname()} browser agent`, key: env.AGENT_KEY,
@@ -23,6 +34,7 @@ export function readConfig(env = process.env) {
     browsers: [...new Set(browsers)], tags: (env.AGENT_TAGS || '').split(',').map(s => s.trim()).filter(Boolean),
     artifactsDir: path.resolve(env.AGENT_ARTIFACTS_DIR || env.AGENT_WORK_DIR || 'artifacts'), enableAdb: env.AGENT_ENABLE_ADB === 'true',
     allowPrivateNetwork: env.AGENT_ALLOW_PRIVATE_NETWORK === 'true',
+    appiumUrl, appiumToken: env.APPIUM_TOKEN, androidPackage, androidActivity, androidBrowser: env.AGENT_ANDROID_BROWSER,
     stepTimeoutMs: integer(env.AGENT_STEP_TIMEOUT_MS, 15000, 100, 300000),
     executionTimeoutSeconds: integer(env.AGENT_EXECUTION_TIMEOUT_SECONDS, 300, 1, 86400),
     headless: env.AGENT_HEADLESS !== 'false'

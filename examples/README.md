@@ -14,4 +14,4 @@ npm ci
 PLATFORM_URL=http://localhost:8080 PLATFORM_TOKEN="$TOKEN" node src/index.js run --suite smoke --platform web --junit smoke.xml
 ```
 
-The CLI prints the portal report URL and returns 0 only when the stored run is PASSED. Android/iOS execution remains unavailable until actual devices and supported executors are connected.
+The CLI prints the portal report URL and returns 0 only when the stored run is PASSED. Optional Android/Appium execution requires actual ADB hardware, a healthy configured service and an explicitly configured test app/Chrome; no device is simulated. iOS/Maestro execution remains unavailable.
