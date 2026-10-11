@@ -1,0 +1,23 @@
+# 无关的大文件与历史目录（保留在本地，不进仓库）
+.uv-cache/
+vendor/
+tools/
+hercules-local-llm-demo/
+hercules-source.zip
+uv.zip
+kimi-error.png
+
+# 敏感信息，绝不入库
+token
+.env
+*.key
+*.pem
+
+# 其他工具目录
+.agents/
+.codex/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
