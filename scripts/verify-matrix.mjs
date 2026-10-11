@@ -94,6 +94,10 @@ try {
   assert.equal(mixed.status, 'FAILED'); assert.equal(mixed.summary.passedVariants, 1); assert.equal(mixed.summary.failedVariants, 1);
   assert.equal(mixed.variants.find(v => v.label === 'chromium').status, 'PASSED');
   assert.equal(mixed.variants.find(v => v.label === 'firefox').status, 'FAILED');
+  const quality = (await request('/quality')).find(q => q.caseId === bad.id);
+  assert.ok(quality); assert.equal(quality.executions, 2);
+  assert.equal(quality.ewmaScore, 0, 'Cross-browser compatibility difference is not a flaky flip');
+  assert.equal(quality.quarantined, false);
   const failedXml = await request(`/matrices/${mixed.id}/junit`, 'GET', undefined, 200, token, true);
   assert.match(failedXml, /<failure\b/);
 
@@ -106,6 +110,12 @@ try {
   assert.equal((await request(`/matrices/${queued.id}/cancel`, 'POST', {})).status, 'CANCELLED');
   const cancelledXml = await request(`/matrices/${queued.id}/junit`, 'GET', undefined, 200, token, true);
   assert.match(cancelledXml, /<error\b/, 'Unexecuted cancellation is not exported as passing tests');
+
+  const timeoutPlan = await request('/plans', 'POST', { ...plan, name: `Queue timeout matrix ${stamp}`, queueTimeoutSeconds: 2 });
+  const timeoutCreated = await request('/matrices', 'POST', { ...input, planId: timeoutPlan.id, name: `Timed out matrix ${stamp}`, variants: unmatched }); pending.add(timeoutCreated.id);
+  const timedOut = await waitFor(async () => { const m = await request(`/matrices/${timeoutCreated.id}`); return terminal.has(m.status) && m; }, 'matrix queue timeout', 15000); pending.delete(timeoutCreated.id);
+  assert.equal(timedOut.status, 'FAILED'); assert.ok(timedOut.variants.every(v => v.status === 'TIMED_OUT'));
+  assert.equal(timedOut.summary.failedVariants, 2);
 
   const viewerName = `matrix-viewer-${stamp}`, viewerPassword = `Matrix-viewer-${stamp}-password`;
   await request('/users', 'POST', { username: viewerName, displayName: 'Matrix acceptance viewer', password: viewerPassword, role: 'VIEWER' });
@@ -120,7 +130,7 @@ try {
   const failExit = await runCommand(['matrix', '--plan', mixedPlan.id, '--browsers', 'chromium,firefox', '--timeout', '90', '--poll-interval', '300'], { PLATFORM_URL: base, PLATFORM_TOKEN: token }, { out: line => outputs.push(line), err: line => errors.push(line) });
   assert.equal(failExit, 1, 'Real mixed-result matrix CLI exits 1');
   await waitFor(async () => { const ds = await request('/devices'); return variants.every(v => ds.some(d => d.browser === v.label && d.status === 'IDLE')); }, 'both resources cleanup');
-  console.log(JSON.stringify({ status: 'verified', passedMatrixId: passed.id, mixedMatrixId: mixed.id, cancelledMatrixId: cancelled.id, planId: plan.id, browsers: passed.variants.map(v => ({ browser: v.deviceFingerprint.browser, version: v.deviceFingerprint.version, runId: v.runId })), evidence, cliExitCodes: [cliExit, failExit], checks: ['approval gate', 'atomic invalid submission', 'duplicate target rejection', 'real Chromium + Firefox pass', 'real browser-specific failure', 'authenticated evidence', 'target fingerprints', 'aggregate JUnit', 'active export rejection', 'idempotent cancel', 'viewer RBAC', 'real CLI success/failure', 'resource cleanup'] }, null, 2));
+  console.log(JSON.stringify({ status: 'verified', passedMatrixId: passed.id, mixedMatrixId: mixed.id, cancelledMatrixId: cancelled.id, timedOutMatrixId: timedOut.id, planId: plan.id, browsers: passed.variants.map(v => ({ browser: v.deviceFingerprint.browser, version: v.deviceFingerprint.version, runId: v.runId })), evidence, cliExitCodes: [cliExit, failExit], checks: ['approval gate', 'atomic invalid submission', 'duplicate target rejection', 'real Chromium + Firefox pass', 'real browser-specific failure', 'environment-aware quality', 'authenticated evidence', 'target fingerprints', 'aggregate JUnit', 'active export rejection', 'idempotent cancel', 'queue timeout', 'viewer RBAC', 'real CLI success/failure', 'resource cleanup'] }, null, 2));
 } finally {
   for (const id of pending) await request(`/matrices/${id}/cancel`, 'POST', {}).catch(() => {});
   target.closeAllConnections(); await new Promise(resolve => target.close(resolve));
