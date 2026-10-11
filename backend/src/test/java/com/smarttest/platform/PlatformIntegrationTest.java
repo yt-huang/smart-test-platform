@@ -34,7 +34,7 @@ class PlatformIntegrationTest {
     Map<String,Object> example(boolean sensitive) {
         return map("name","Actual browser check","platform","web","framework","playwright","sensitive",sensitive,"steps",List.of(map("action","goto","target","https://example.org","value",""),map("action","expectVisible","target","h1","value","")));
     }
-    Map<String,Object> approved(boolean sensitive) { var c=service.createCase(example(sensitive),"admin"); return service.approveCase(str(c,"id"),"admin"); }
+    Map<String,Object> approved(boolean sensitive) { var c=service.createCase(example(sensitive),"admin"); return service.approveCase(str(c,"id"),number(c,"revision",0),"admin"); }
     Map<String,Object> target(String id,String provider,List<String> tags) { return map("id",id,"name",id,"platform","web","browser","chromium","version","131","provider",provider,"tags",tags,"status","IDLE","cleanupOk",true); }
     Map<String,Object> enroll(String agent,String session,List<Map<String,Object>> targets) {
         var key=service.createKey(map("name",agent),"admin"); register(agent,session,str(key,"key"),targets); return key;
@@ -87,12 +87,28 @@ class PlatformIntegrationTest {
     @Test void caseRevisionsRequireHumanApprovalAndRunUsesImmutableSnapshot() {
         var draft=service.createCase(example(false),"admin"); assertEquals("DRAFT",draft.get("status"));
         assertThrows(ApiException.class,()->submit(draft));
-        var c=service.approveCase(str(draft,"id"),"admin");
+        var c=service.approveCase(str(draft,"id"),number(draft,"revision",0),"admin");
         var run=submit(c); var edited=example(false); edited.put("name","Changed title");
         var revised=service.updateCase(str(c,"id"),edited,"admin"); assertEquals("DRAFT",revised.get("status"));
         assertEquals(3,service.caseHistory(str(c,"id")).size());
         assertEquals("Actual browser check",objects(store.get("run",str(run,"id")).get("_cases")).getFirst().get("name"));
         assertThrows(ApiException.class,()->service.createCase(map("name","unsafe","steps",List.of(map("action","shell","target","rm -rf /"))),"admin"));
+    }
+    @Test void concurrentEditCannotApproveAnUnseenRevision() throws Exception {
+        var reviewed=service.createCase(example(false),"admin"); String id=str(reviewed,"id"); int expected=number(reviewed,"revision",0);
+        CountDownLatch reviewerRead=new CountDownLatch(1),editorCommitted=new CountDownLatch(1);
+        try(var executor=Executors.newVirtualThreadPerTaskExecutor()) {
+            var editor=executor.submit(()->{ try { reviewerRead.await(); var changed=example(false); changed.put("name","Changed by another engineer"); service.updateCase(id,changed,"another-engineer"); editorCommitted.countDown(); }catch(InterruptedException e){Thread.currentThread().interrupt();throw new RuntimeException(e);} });
+            reviewerRead.countDown(); assertTrue(editorCommitted.await(5,TimeUnit.SECONDS)); editor.get(5,TimeUnit.SECONDS);
+            String token=adminToken();
+            mvc.perform(post("/api/cases/"+id+"/approve").header("Authorization","Bearer "+token).contentType("application/json").content(json.writeValueAsString(map("revision",expected)))).andExpect(status().isConflict()).andExpect(jsonPath("$.message").exists());
+            assertEquals("DRAFT",service.get("case",id).get("status"));
+            assertEquals(2,service.caseHistory(id).size(),"Rejected stale review must not add an approval history event");
+            mvc.perform(post("/api/cases/"+id+"/approve").header("Authorization","Bearer "+token).contentType("application/json").content("{}")).andExpect(status().isBadRequest());
+            mvc.perform(post("/api/cases/"+id+"/approve").header("Authorization","Bearer "+token).contentType("application/json").content("{\"revision\":1.5}")).andExpect(status().isBadRequest());
+            mvc.perform(post("/api/cases/"+id+"/approve").header("Authorization","Bearer "+token).contentType("application/json").content("{\"revision\":2}")).andExpect(status().isOk());
+            assertEquals("APPROVED",service.get("case",id).get("status"));
+        }
     }
     @Test void sensitiveCasesCanOnlyUseAdministratorTrustedLocalResources() {
         enroll("local","sl",List.of(target("untrusted","local",List.of("trusted"))));

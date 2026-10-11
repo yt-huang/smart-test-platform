@@ -87,8 +87,12 @@ public class PlatformService {
         var value=store.get("case",id); value.putAll(caseFields(input)); value.put("status","DRAFT"); value.put("updatedAt",now()); value.put("revision",number(value,"revision",0)+1);
         store.save("case",value); history(value,actor,"UPDATE"); audit(actor,"UPDATE_CASE",id,"Revision requires approval"); return value;
     }
-    public synchronized Map<String,Object> approveCase(String id,String actor) {
-        var value=store.get("case",id); value.put("status","APPROVED"); value.put("updatedAt",now()); value.put("approvedBy",actor);
+    public synchronized Map<String,Object> approveCase(String id,int expectedRevision,String actor) {
+        if(expectedRevision<1)throw ApiException.bad("The reviewed case revision is required");
+        var value=store.get("case",id);
+        if(number(value,"revision",0)!=expectedRevision)throw new ApiException(HttpStatus.CONFLICT,"Case changed since review; reload the current revision and review again");
+        if("APPROVED".equals(value.get("status")))return value;
+        value.put("status","APPROVED"); value.put("updatedAt",now()); value.put("approvedBy",actor);
         store.save("case",value); history(value,actor,"APPROVE"); audit(actor,"APPROVE_CASE",id,str(value,"name")); return value;
     }
     public synchronized List<Map<String,Object>> caseHistory(String id) {

@@ -29,7 +29,9 @@ public class ApiController {
     @GetMapping("/cases/{id}") public Object oneCase(@PathVariable String id) { return service.get("case",id); }
     @PostMapping("/cases") public Object createCase(@RequestBody Map<String,Object> in,HttpServletRequest req) { return service.createCase(in,actor(req)); }
     @PutMapping("/cases/{id}") public Object updateCase(@PathVariable String id,@RequestBody Map<String,Object> in,HttpServletRequest req) { return service.updateCase(id,in,actor(req)); }
-    @PostMapping("/cases/{id}/approve") public Object approve(@PathVariable String id,HttpServletRequest req) { return service.approveCase(id,actor(req)); }
+    @PostMapping("/cases/{id}/approve") public Object approve(@PathVariable String id,@RequestBody Map<String,Object> in,HttpServletRequest req) {
+        return service.approveCase(id,PlatformService.bounded(in,"revision",0,1,Integer.MAX_VALUE),actor(req));
+    }
     @DeleteMapping("/cases/{id}") public Object deleteCase(@PathVariable String id,HttpServletRequest req) { service.deleteCase(id,actor(req)); return Map.of("message","Deleted"); }
     @GetMapping("/cases/{id}/history") public Object history(@PathVariable String id) { return service.caseHistory(id); }
     @GetMapping("/plans") public Object plans() { return service.list("plan"); }
