@@ -25,6 +25,7 @@ services:
       PLATFORM_EVIDENCE_PATH: /app/evidence
       PLATFORM_FORWARD_HEADERS: framework
       PLATFORM_TRUST_PROXY: "true"
+      PLATFORM_ALLOW_INTERNAL_HTTP: "true"
     ports:
       - "8080:8080"
     volumes:
@@ -40,6 +41,9 @@ services:
       start_period: 40s
     restart: unless-stopped
   browser-agent:
+    hostname: browser-agent
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     build:
       context: ./agent
     environment:

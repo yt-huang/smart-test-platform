@@ -21,7 +21,7 @@ docker compose up -d --build --wait
 node scripts/admin-password.mjs
 ```
 
-打开 `http://localhost:8080`。Compose 包含中心平台、PostgreSQL、浏览器 Agent；数据库不映射公网端口。应用和证据数据使用独立命名卷。公网部署需要可信 HTTPS 反向代理，Agent 使用对应 WSS 地址。管理员与数据库密码在忽略提交的 `.env` 中分别随机生成。
+打开 `http://localhost:8080`。Compose 包含中心平台、PostgreSQL、浏览器 Agent；数据库不映射公网端口。应用和证据数据使用独立命名卷。Codespaces 的外部连接由 GitHub HTTPS 终止，当前 Docker 私网使用显式启用的内部 HTTP；完整的内部 TLS 仍需配置并验收。公网部署需要可信 HTTPS 反向代理，办公机 Agent 使用对应 WSS 地址。管理员与数据库密码在忽略提交的 `.env` 中分别随机生成。
 
 ## 本地开发
 

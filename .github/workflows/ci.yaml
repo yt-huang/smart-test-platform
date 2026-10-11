@@ -14,6 +14,7 @@ jobs:
       PLATFORM_ADMIN_PASSWORD: ci-acceptance-only-long-password
       PLATFORM_URL: http://127.0.0.1:8080
       AGENT_ID: ci-browser
+      AGENT_HOST_FINGERPRINT: ci-browser
       AGENT_WORK_DIR: /tmp/platform-agent
       AGENT_KEY_FILE: /tmp/platform-agent/key.json
       AGENT_ALLOW_PRIVATE_NETWORK: 'true'
