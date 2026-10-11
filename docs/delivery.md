@@ -2,6 +2,8 @@
 
 本次从仅有设计文档的 `db60c88` 开始，按项目 `saas-multi-agent` skill 完成中心平台与浏览器执行闭环。交付范围对应 `implement-platform-m1`，原 `build-test-platform-agent-arch` 的全部 M1/M2/M3 尚未整体验收。
 
+本文下列版本与部署数据为首阶段历史记录。当前平台已继续完成 [浏览器矩阵](matrix-delivery.md) 与 [隔离用例门禁](gate-delivery.md)，最新应用版本、CI 和云端验收以这两份后续记录为准。
+
 ## 实际协作与集成
 
 协调者 `/root` 负责需求契约、OpenSpec、部署、CI 和集成；首阶段由真实 Codex 子 Agent `/root/backend`、`/root/frontend`、`/root/runtime` 分别在独立 Git worktree 实现，新上下文 `/root/acceptance` 负责独立业务和视觉验收。后续按用户的主动跨模型协作偏好，真实 Kimi Code CLI 实现持久化校验工具，独立 Codex `/root/kimi_acceptance` 验收；主控并行处理 CI 与云端验证。设计输入为 `docs/ui-handoff.md`，契约为 `docs/implementation-handoff.md`。
@@ -66,7 +68,7 @@ CLI 生命周期元数据及 stdout JSONL/stderr 保存在本机忽略提交的 
 
 ## 仍需接入或后续实施
 
-浏览器矩阵回归已另行实现，详见 [矩阵交付记录](matrix-delivery.md)。原规格中 Android/iOS 真机业务冒烟、Mac/WDA、Maestro、scrcpy 投屏、远程 ADB、设备预约/真机矩阵、Top 20 真机、云真机供应商、飞书通知、私有视觉模型、AI 生成/自愈/归因、WebRTC，以及全链路内部 TLS 均未完成验收。当前浏览器隔离使用每用例独立上下文，尚非原规格的每会话独立容器池。证据为平台鉴权上传下载，尚非对象存储预签名直传。
+浏览器矩阵回归已另行实现，详见 [矩阵交付记录](matrix-delivery.md)；随后完成隔离用例 CI 门禁，详见 [门禁交付记录](gate-delivery.md)。原规格中 Android/iOS 真机业务冒烟、Mac/WDA、Maestro、scrcpy 投屏、远程 ADB、设备预约/真机矩阵、Top 20 真机、云真机供应商、飞书通知、私有视觉模型、AI 生成/自愈/归因、WebRTC，以及全链路内部 TLS 均未完成验收。当前浏览器隔离使用每用例独立上下文，尚非原规格的每会话独立容器池。证据为平台鉴权上传下载，尚非对象存储预签名直传。
 
 后端调度只支持一个中心进程；横向扩容需要数据库原子分布式资源认领。长期生产还需要分页/索引、证据保留策略、外部身份和账号生命周期、完整审计保留与实际备份恢复演练。
 
