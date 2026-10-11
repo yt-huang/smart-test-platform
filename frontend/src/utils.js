@@ -6,6 +6,7 @@ export const statusLabels = {
 };
 export const activeStatuses = ['QUEUED', 'ASSIGNED', 'RUNNING', 'CLEANING'];
 export const canWrite = (role) => ['ADMIN', 'TESTER', 'DEVELOPER'].includes(role);
+export const canReviewQuality = (role) => ['ADMIN', 'TESTER'].includes(role);
 export const dateTime = (value) => value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'medium' }).format(new Date(value)) : '—';
 export const shortDate = (value) => value ? new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit' }).format(new Date(value)) : '—';
 export const duration = (ms) => ms == null ? '—' : ms < 1000 ? `${Math.round(ms)} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} 秒` : `${Math.floor(ms / 60000)} 分 ${Math.round(ms % 60000 / 1000)} 秒`;

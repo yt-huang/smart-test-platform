@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canWrite, caseApprovalBody, fingerprintDetails, resolveEvidenceUrl, validateSteps, splitTags } from './utils.js';
+import { canWrite, canReviewQuality, caseApprovalBody, fingerprintDetails, resolveEvidenceUrl, validateSteps, splitTags } from './utils.js';
 
 test('only authoring roles can make write controls available', () => {
   for (const role of ['ADMIN', 'TESTER', 'DEVELOPER']) assert.equal(canWrite(role), true);
@@ -39,4 +39,9 @@ test('run device publicDocument renders only readable scalar fingerprint fields'
     assert.ok(fingerprintDetails(fingerprint).every(field => typeof field.value === 'string' && !field.value.includes('[object Object]')));
   }
   assert.deepEqual(fingerprintDetails('legacy-host-fingerprint'), [{ label: '资源指纹', value: 'legacy-host-fingerprint' }]);
+});
+test('quality release controls require ADMIN or TESTER, excluding other authoring roles', () => {
+  assert.equal(canReviewQuality('ADMIN'), true);
+  assert.equal(canReviewQuality('TESTER'), true);
+  for (const role of ['DEVELOPER', 'VIEWER', undefined, 'UNKNOWN']) assert.equal(canReviewQuality(role), false);
 });

@@ -37,3 +37,7 @@ Validation for this fix: `npm test` 5/5 passed; `npm run build` passed. Browser/
 ## Independent acceptance fix: structured resource fingerprint
 
 Run reports now format the backend's `deviceFingerprint` public device document into explicit name, model/browser, platform, OS/version, provider and Agent fields. The formatter returns scalar strings for every rendered value and supports null/malformed fields plus legacy string fingerprints, preventing React object-child crashes. Regression uses the actual public device shape. `npm test` 6/6 passed; `npm run build` passed.
+
+## Real quality review section
+
+Dashboard now fetches `/api/quality` independently and shows actual per-case execution/pass/fail counts, same-commit verdict-change EWMA, latest commit/verdict/report, and persistent review flags. Empty/error/loading states remain factual. ADMIN and TESTER may explicitly complete a review with a meaningful reason and human confirmation; POST `/api/quality/{caseId}/release` is audited by the backend. DEVELOPER and VIEWER see read-only review state. UI explains that this informational flag does not block explicit execution and does not present EWMA as a pass rate. `npm test` 7/7 passed; `npm run build` passed.
