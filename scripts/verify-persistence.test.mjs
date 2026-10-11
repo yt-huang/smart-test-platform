@@ -5,6 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, existsSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -384,6 +385,24 @@ test('check fails when the device was reattached to another agent', async (t) =>
   });
 });
 
+test('check rejects a snapshot whose resource pair was edited away from the report identity', async (t) => {
+  await withFixture(t, async ({ state, platformUrl, dir }) => {
+    seedDeployment(state);
+    const snapshot = await baselineOk(state, platformUrl, dir);
+    const doc = JSON.parse(readFileSync(snapshot, 'utf8'));
+    doc.resources[0].agentId = 'agent-2'; // inconsistent with report pair (dev-1, agent-1)
+    writeFileSync(snapshot, JSON.stringify(doc));
+    // live state "confirms" the forgery: device reattached to agent-2, agent-2 ONLINE
+    state.devices[0].agentId = 'agent-2';
+    state.agents.push({ id: 'agent-2', name: 'agent-two', status: 'ONLINE', targetIds: ['dev-1'] });
+    const attemptsBefore = state.loginAttempts;
+    const check = await runCli(['check', '--snapshot', snapshot, '--wait-seconds', '1'], { platformUrl, password: state.password, cwd: dir });
+    assert.notEqual(check.code, 0);
+    assert.match(check.stderr, /does not match the snapshot resource pair/);
+    assert.equal(state.loginAttempts, attemptsBefore, 'inconsistent snapshot must be rejected before authentication');
+  });
+});
+
 test('wrong password fails without writing snapshot or echoing the password', async (t) => {
   await withFixture(t, async ({ state, platformUrl, dir }) => {
     seedDeployment(state);
@@ -457,6 +476,63 @@ test('error output never echoes credential-bearing evidence URLs', async (t) => 
     assert.notEqual(result.code, 0);
     assert.match(result.stderr, /evidence download failed/);
     assert.ok(!result.stdout.includes('secretqueryvalue') && !result.stderr.includes('secretqueryvalue'), 'error echoes the credential query');
+    assert.ok(!existsSync(snapshot));
+  });
+});
+
+test('synthetic credentials in evidence URLs never leak through any error path', async (t) => {
+  await withFixture(t, async ({ state, platformUrl, dir }) => {
+    // Runtime-generated synthetic credentials: asserted absent from all
+    // output, never interpolated into assertion messages.
+    const synPass = `synpass-${randomUUID()}`;
+    const synToken = `syntoken-${randomUUID()}`;
+    const port = new URL(platformUrl).port;
+    state.cases.push({ id: 'case-1', name: 'c', status: 'APPROVED', revision: 1 });
+    state.plans.push({ id: 'plan-1', name: 'p', caseIds: ['case-1'] });
+    state.devices.push({ id: 'dev-1', name: 'd', platform: 'web', status: 'IDLE', agentId: 'agent-1' });
+    state.agents.push({ id: 'agent-1', name: 'a', status: 'ONLINE', targetIds: ['dev-1'] });
+    state.evidence.set('ev-1', Buffer.from('evidence-bytes'));
+    state.runs.push({
+      id: 'run-1', name: 'x', status: 'PASSED', planId: 'plan-1', caseIds: ['case-1'], summary: { passed: 1, failed: 0, total: 1 },
+      results: [{ caseId: 'case-1', status: 'PASSED', evidence: [{ id: 'ev-1', name: 'x.png', url: '/api/evidence/ev-1' }] }],
+      deviceId: 'dev-1', agentId: 'agent-1', finishedAt: '2026-10-10T00:00:00Z',
+    });
+    const snapshot = path.join(dir, 'persistence.json');
+    const scenarios = [
+      ['userinfo+query', `http://user:${synPass}@127.0.0.1:${port}/api/evidence/ev-1?token=${synToken}`, /userinfo/],
+      ['path token', `/api/evidence/ev-1-${synToken}`, /evidence download failed \(HTTP 404\)/],
+      ['cross-origin host token', `http://${synToken}.example.invalid/evil.png`, /not same-origin/],
+    ];
+    for (const [name, url, pattern] of scenarios) {
+      state.runs[0].results[0].evidence[0].url = url;
+      const result = await runCli(['baseline', '--snapshot', snapshot], { platformUrl, password: state.password, cwd: dir });
+      assert.notEqual(result.code, 0, `${name}: expected nonzero exit`);
+      assert.match(result.stderr, pattern, `${name}: expected a fixed-label error`);
+      const combined = `${result.stdout}\n${result.stderr}`;
+      assert.ok(!combined.includes(synPass), `${name}: synthetic password leaked`);
+      assert.ok(!combined.includes(synToken), `${name}: synthetic token leaked`);
+      assert.ok(!existsSync(snapshot), `${name}: failed baseline must not write a snapshot`);
+    }
+  });
+});
+
+test('baseline refuses to write a snapshot whose platform data embeds a current credential', async (t) => {
+  await withFixture(t, async ({ state, platformUrl, dir }) => {
+    seedDeployment(state);
+    const snapshot = path.join(dir, 'persistence.json');
+    // server-controlled run name echoes the admin password
+    state.runs[0].name = state.password;
+    const withPassword = await runCli(['baseline', '--snapshot', snapshot], { platformUrl, password: state.password, cwd: dir });
+    assert.notEqual(withPassword.code, 0);
+    assert.match(withPassword.stderr, /refusing to write snapshot/);
+    assert.ok(!withPassword.stdout.includes(state.password) && !withPassword.stderr.includes(state.password), 'error echoes the password');
+    assert.ok(!existsSync(snapshot));
+    // server-controlled run name echoes the bearer token (known after login)
+    state.runs[0].name = state.token;
+    const withToken = await runCli(['baseline', '--snapshot', snapshot], { platformUrl, password: state.password, cwd: dir });
+    assert.notEqual(withToken.code, 0);
+    assert.match(withToken.stderr, /refusing to write snapshot/);
+    assert.ok(!withToken.stdout.includes(state.token) && !withToken.stderr.includes(state.token), 'error echoes the token');
     assert.ok(!existsSync(snapshot));
   });
 });

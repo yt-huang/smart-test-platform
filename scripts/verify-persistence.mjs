@@ -19,6 +19,20 @@ const SHA256_RE = /^[0-9a-f]{64}$/;
 
 class VerifyError extends Error {}
 
+// Known credential values (admin password, then the login token once issued).
+// Every line of CLI output is redacted against this list, and snapshots whose
+// platform-provided data embeds one of them are refused, so a server-controlled
+// echo can never persist or display a credential.
+const runtimeSecrets = [];
+
+function redact(text) {
+  let out = String(text);
+  for (const secret of runtimeSecrets) {
+    if (secret) out = out.split(secret).join('[redacted]');
+  }
+  return out;
+}
+
 function usage() {
   console.error('Usage: node scripts/verify-persistence.mjs <baseline|check> --snapshot <path> [--wait-seconds N]');
   process.exit(2);
@@ -92,8 +106,11 @@ async function apiFetch(label, url, { method = 'GET', body, token } = {}) {
       },
       body: body ? JSON.stringify(body) : undefined,
     });
-  } catch (err) {
-    throw new VerifyError(`request to ${label} failed: ${err.message}`);
+  // Only the fixed endpoint label is reported. Raw network error messages are
+  // never appended: they can embed the full request URL (userinfo, query
+  // tokens) that Node fetch was asked to use.
+  } catch {
+    throw new VerifyError(`request to ${label} failed`);
   }
   if (response.status >= 300 && response.status < 400) {
     throw new VerifyError(`unexpected redirect (HTTP ${response.status}) on ${label}; refusing to follow`);
@@ -111,6 +128,7 @@ async function login(base, password) {
   let data;
   try { data = await response.json(); } catch { throw new VerifyError('login returned invalid JSON'); }
   if (!data?.token) throw new VerifyError('login response did not include a token');
+  runtimeSecrets.push(data.token);
   return data.token;
 }
 
@@ -126,18 +144,22 @@ function sha256(bytes) {
 }
 
 // Evidence bytes are only ever fetched from the platform origin; the Bearer
-// token must never be sent to a third party.
+// token must never be sent to a third party. All evidence errors use fixed
+// operation labels — never the URL's host, path or query, which are
+// server-controlled and may carry synthetic credentials.
 async function downloadEvidence(origin, base, token, url) {
   let parsed;
   try { parsed = new URL(url, base); } catch { throw new VerifyError('evidence URL is not a valid URL'); }
-  if (parsed.origin !== origin) {
-    throw new VerifyError(`evidence host ${parsed.host} is not same-origin with platform ${origin}; refusing to send credentials elsewhere`);
+  if (parsed.username || parsed.password) {
+    throw new VerifyError('evidence URL embeds credentials in userinfo; refusing to use it');
   }
-  const label = `${parsed.origin}${parsed.pathname}`;
-  const response = await apiFetch(label, parsed, { token });
-  if (!response.ok) throw new VerifyError(`evidence download failed (HTTP ${response.status}) on ${label}`);
+  if (parsed.origin !== origin) {
+    throw new VerifyError('evidence URL is not same-origin with the platform; refusing to send credentials elsewhere');
+  }
+  const response = await apiFetch('download evidence', parsed, { token });
+  if (!response.ok) throw new VerifyError(`evidence download failed (HTTP ${response.status})`);
   const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.length === 0) throw new VerifyError(`evidence on ${label} is empty; refusing to verify on empty bytes`);
+  if (bytes.length === 0) throw new VerifyError('evidence is empty; refusing to verify on empty bytes');
   return bytes;
 }
 
@@ -235,8 +257,14 @@ async function baseline({ origin, base, password, snapshot }) {
   };
   // Only write the snapshot once every check above succeeded, so failed
   // baselines (bad credentials, empty deployment) never leave a file behind.
-  writeFileSync(snapshot, `${JSON.stringify(snapshotDoc, null, 2)}\n`);
-  console.log(JSON.stringify({
+  // Platform-provided data (names, SHAs, ids) must not smuggle the current
+  // credentials into the snapshot either.
+  const serialized = `${JSON.stringify(snapshotDoc, null, 2)}\n`;
+  if (runtimeSecrets.some(s => s && serialized.includes(s))) {
+    throw new VerifyError('refusing to write snapshot: platform data contains a current credential value');
+  }
+  writeFileSync(snapshot, serialized);
+  console.log(redact(JSON.stringify({
     status: 'baseline-created',
     snapshot,
     runs: runIds.length,
@@ -245,7 +273,7 @@ async function baseline({ origin, base, password, snapshot }) {
     reports: reports.length,
     evidence: reports.reduce((n, r) => n + r.evidence.length, 0),
     resources: resources.map(r => r.deviceId),
-  }, null, 2));
+  }, null, 2)));
 }
 
 // Strict structural validation BEFORE any authentication or check: a vacuous
@@ -294,14 +322,18 @@ function validateSnapshot(doc, snapshot) {
     }
   }
   if (!Array.isArray(doc.resources) || doc.resources.length === 0) fail('no resource identities');
-  const resourceDevices = new Set();
+  const resourcePairs = new Map(); // deviceId -> agentId
   for (const res of doc.resources) {
     if (!res || !nonEmptyString(res.deviceId) || !nonEmptyString(res.agentId)) fail('a resource lacks deviceId/agentId');
-    if (resourceDevices.has(res.deviceId)) fail(`duplicate resource identity for device ${res.deviceId}`);
-    resourceDevices.add(res.deviceId);
+    if (resourcePairs.has(res.deviceId)) fail(`duplicate resource identity for device ${res.deviceId}`);
+    resourcePairs.set(res.deviceId, res.agentId);
   }
   for (const r of doc.reports) {
-    if (!resourceDevices.has(r.deviceId)) fail(`report ${r.id} device ${r.deviceId} has no resolved resource identity`);
+    const resourceAgent = resourcePairs.get(r.deviceId);
+    if (resourceAgent === undefined) fail(`report ${r.id} device ${r.deviceId} has no resolved resource identity`);
+    if (resourceAgent !== r.agentId) {
+      fail(`report ${r.id} pair (${r.deviceId}, ${r.agentId}) does not match the snapshot resource pair (${r.deviceId}, ${resourceAgent})`);
+    }
   }
   return { runIds, caseIds, planIds, reports: doc.reports, resources: doc.resources };
 }
@@ -387,7 +419,7 @@ async function check({ origin, base, password, snapshot, waitSeconds }) {
     await delay(1000);
   }
 
-  console.log(JSON.stringify({
+  console.log(redact(JSON.stringify({
     status: 'verified',
     snapshot,
     runsRetained: baselineState.runIds.length,
@@ -396,13 +428,14 @@ async function check({ origin, base, password, snapshot, waitSeconds }) {
     reportsVerified: baselineState.reports.length,
     evidenceIntact: baselineState.reports.reduce((n, r) => n + r.evidence.length, 0),
     resourcesRecovered: baselineState.resources.map(r => r.deviceId),
-  }, null, 2));
+  }, null, 2)));
 }
 
 const args = parseArgs(process.argv.slice(2));
 const config = loadConfig();
+runtimeSecrets.push(config.password);
 const action = args.command === 'baseline' ? baseline : check;
 action({ origin: config.origin, base: config.base, password: config.password, snapshot: args.snapshot, waitSeconds: args.waitSeconds }).catch((err) => {
-  console.error(`verify-persistence: ${err.message}`);
+  console.error(redact(`verify-persistence: ${err.message}`));
   process.exit(1);
 });
