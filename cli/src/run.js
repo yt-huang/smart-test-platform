@@ -2,6 +2,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createApi, safeErrorMessage } from './api.js';
 import { ConfigurationError } from './errors.js';
+import { gateDescription, gateIdentity, validateExecutionGate } from './gate.js';
+import { validateGateJunit } from './gate-junit.js';
 
 export { ConfigurationError } from './errors.js';
 
@@ -10,15 +12,21 @@ const runStatuses = new Set(['QUEUED', 'ASSIGNED', 'RUNNING', 'CLEANING', ...ter
 const matrixStatuses = new Set(['QUEUED', 'RUNNING', 'PASSED', 'FAILED', 'CANCELLED']);
 const browsers = new Set(['chromium', 'firefox', 'webkit']);
 const sharedOptions = { '--plan': 'plan', '--junit': 'junit', '--timeout': 'timeout', '--poll-interval': 'pollInterval', '--name': 'name', '--commit': 'commit' };
-const help = 'platform run (--suite smoke|regression [--platform web|android|ios] [--browser chromium|firefox|webkit] | --plan ID) [--junit FILE] [--timeout SECONDS] [--poll-interval MS] [--name TEXT] [--commit SHA]\nplatform matrix --plan ID --browsers chromium,firefox[,webkit] [--junit FILE] [--timeout SECONDS] [--poll-interval MS] [--name TEXT] [--commit SHA]\nEnvironment: PLATFORM_URL, PLATFORM_TOKEN. Exit: 0 passed, 1 failed/timed out/cancelled, 2 configuration or API error.';
+const help = 'platform run (--suite smoke|regression [--platform web|android|ios] [--browser chromium|firefox|webkit] | --plan ID) [--gate] [--junit FILE] [--timeout SECONDS] [--poll-interval MS] [--name TEXT] [--commit SHA]\nplatform matrix --plan ID --browsers chromium,firefox[,webkit] [--gate] [--junit FILE] [--timeout SECONDS] [--poll-interval MS] [--name TEXT] [--commit SHA]\nEnvironment: PLATFORM_URL, PLATFORM_TOKEN. Exit: 0 raw PASSED (or gate PASSED/WARN with --gate), 1 raw failure or gate BLOCKED or polling timeout, 2 configuration, API or invalid gate error. --gate --junit downloads gate JUnit.';
 
 export function parseArgs(argv) {
+  if (argv.filter(value => value === '--gate').length > 1) throw new ConfigurationError('Invalid or duplicate option: --gate');
   if (argv.includes('--help') || argv.length === 0) return { help: true };
   const command = argv[0];
   if (!['run', 'matrix'].includes(command)) throw new ConfigurationError('Expected command: platform run or platform matrix');
   const options = { command };
   const names = command === 'matrix' ? { ...sharedOptions, '--browsers': 'browsers' } : { ...sharedOptions, '--suite': 'suite', '--browser': 'browser', '--platform': 'platform' };
   for (let i = 1; i < argv.length; i++) {
+    if (argv[i] === '--gate') {
+      if (options.gate) throw new ConfigurationError('Invalid or duplicate option: --gate');
+      options.gate = true;
+      continue;
+    }
     const key = Object.hasOwn(names, argv[i]) ? names[argv[i]] : undefined;
     if (!key) throw new ConfigurationError(`Unsupported option for ${command}`);
     if (!argv[i + 1]?.trim() || argv[i + 1].startsWith('--') || options[key] !== undefined) throw new ConfigurationError(`Invalid or duplicate option: ${argv[i]}`);
@@ -50,7 +58,10 @@ function validateExecution(execution, command, options, expectedId) {
   if (!execution || typeof execution.id !== 'string' || !execution.id.trim() || !statuses.has(execution.status) || (expectedId && execution.id !== expectedId)) {
     throw new ConfigurationError(`Platform did not return a valid ${command} ID/status`);
   }
-  if (command !== 'matrix') return;
+  if (command !== 'matrix') {
+    if (options.gate) validateExecutionGate(execution, command);
+    return;
+  }
   const countKeys = ['total', 'passed', 'failed'];
   const validSummary = summary => summary && countKeys.every(key => Number.isInteger(summary[key]) && summary[key] >= 0)
     && summary.passed + summary.failed <= summary.total;
@@ -77,6 +88,7 @@ function validateExecution(execution, command, options, expectedId) {
       : execution.variants.some(variant => variant.status === 'CANCELLED') ? 'CANCELLED' : 'PASSED';
     if (execution.status !== derivedStatus) throw new ConfigurationError('Platform returned inconsistent matrix result status');
   }
+  if (options.gate) validateExecutionGate(execution, command);
 }
 
 function resultCounts(execution) {
@@ -84,6 +96,7 @@ function resultCounts(execution) {
 }
 
 export async function runCommand(argv, env = process.env, { out = console.log, err = console.error, fetchImpl = fetch, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), now = Date.now } = {}) {
+  const print = value => out(safeErrorMessage(new Error(String(value)), env));
   try {
     const options = parseArgs(argv);
     if (options.help) { out(help); return 0; }
@@ -107,40 +120,50 @@ export async function runCommand(argv, env = process.env, { out = console.log, e
     if (command === 'matrix') body.variants = options.browsers.map(browser => ({ label: browser, capabilities: { browser } }));
     let execution = await request(`/${resource}`, { method: 'POST', body });
     validateExecution(execution, command, options);
+    const submittedGateIdentity = options.gate ? gateIdentity(execution, command) : '';
     const id = execution.id;
     const route = `/${resource}/${encodeURIComponent(id)}`;
     // Keep the human report URL visible even if polling or export subsequently fails.
-    out(`${title} ${id}: ${execution.status}`);
-    out(`Report: ${base}/#${route}`);
+    print(`${title} ${id}: ${execution.status}`);
+    print(`Report: ${base}/#${route}`);
     const deadline = now() + options.timeout * 1000;
     let lastStatus = execution.status;
     const printTargets = () => {
       if (command !== 'matrix') return;
       for (const variant of execution.variants) {
-        out(`${variant.label}: ${variant.status} (${resultCounts(variant)})`);
-        out(`  Report: ${base}/#/runs/${encodeURIComponent(variant.runId)}`);
-        if (variant.message) out(`  Message: ${safeErrorMessage(new Error(String(variant.message)), env)}`);
+        print(`${variant.label}: ${variant.status} (${resultCounts(variant)})`);
+        print(`  Report: ${base}/#/runs/${encodeURIComponent(variant.runId)}`);
+        if (options.gate) print(`  Gate: ${gateDescription(variant.gate)}`);
+        if (variant.message) print(`  Message: ${variant.message}`);
       }
     };
+    if (options.gate) print(`Gate: ${gateDescription(execution.gate)}`);
     printTargets();
     while (!terminal.has(execution.status)) {
-      if (now() >= deadline) { err(`Timed out waiting for ${command} ${id}; the platform ${command} remains active. Use the portal to cancel it.`); return 1; }
+      if (now() >= deadline) { err(safeErrorMessage(new Error(`Timed out waiting for ${command} ${id}; the platform ${command} remains active. Use the portal to cancel it.`), env)); return 1; }
       await sleep(Math.min(options.pollInterval, Math.max(0, deadline - now())));
-      if (now() >= deadline) { err(`Timed out waiting for ${command} ${id}; the platform ${command} remains active. Use the portal to cancel it.`); return 1; }
+      if (now() >= deadline) { err(safeErrorMessage(new Error(`Timed out waiting for ${command} ${id}; the platform ${command} remains active. Use the portal to cancel it.`), env)); return 1; }
       const previousTargets = command === 'matrix' ? JSON.stringify(execution.variants) : '';
+      const previousGate = options.gate ? JSON.stringify(execution.gate) : '';
       execution = await request(route);
       validateExecution(execution, command, options, id);
-      if (execution.status !== lastStatus) { out(`${title} ${id}: ${execution.status}`); lastStatus = execution.status; }
+      if (options.gate && gateIdentity(execution, command) !== submittedGateIdentity) throw new ConfigurationError('Platform returned invalid gate: submission snapshot changed while polling');
+      if (execution.status !== lastStatus) { print(`${title} ${id}: ${execution.status}`); lastStatus = execution.status; }
+      if (options.gate && JSON.stringify(execution.gate) !== previousGate) print(`Gate: ${gateDescription(execution.gate)}`);
       if (command === 'matrix' && JSON.stringify(execution.variants) !== previousTargets) printTargets();
     }
+    if (options.gate) print(`${execution.status}: ${resultCounts(execution)}`);
+    if (options.gate && execution.gate.status === 'WARN') print(`WARNING: Gate WARN allows CI to pass with ${execution.gate.quarantinedFailures} quarantined failures; raw ${execution.status} results remain in the report.`);
     if (options.junit) {
-      const xml = await request(`${route}/junit`, { xml: true });
+      const xml = await request(`${route}/${options.gate ? 'gate-junit' : 'junit'}`, { xml: true });
+      if (options.gate) validateGateJunit(xml, execution, command);
       const target = path.resolve(options.junit);
       await mkdir(path.dirname(target), { recursive: true });
       await writeFile(target, xml, 'utf8');
-      out(`JUnit: ${target}`);
+      print(`${options.gate ? 'Gate JUnit' : 'JUnit'}: ${target}`);
     }
-    out(`${execution.status}: ${resultCounts(execution)}`);
+    if (options.gate) return execution.gate.status === 'BLOCKED' ? 1 : 0;
+    print(`${execution.status}: ${resultCounts(execution)}`);
     return execution.status === 'PASSED' ? 0 : 1;
   } catch (error) { err(safeErrorMessage(error, env)); return 2; }
 }

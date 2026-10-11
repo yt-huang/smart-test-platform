@@ -3,7 +3,8 @@ import { ConfigurationError } from './errors.js';
 export function safeErrorMessage(error, env) {
   let message = error instanceof Error ? error.message : 'Unexpected CLI error';
   const token = env.PLATFORM_TOKEN;
-  for (const secret of new Set([token, token?.trim()].filter(Boolean))) message = message.split(secret).join('[REDACTED]');
+  const secrets = [token, token?.trim()].filter(Boolean);
+  for (const secret of new Set([...secrets, ...secrets.map(value => encodeURIComponent(value))])) message = message.split(secret).join('[REDACTED]');
   return message
     .replace(/Bearer\s+[^\s"',;]+/gi, 'Bearer [REDACTED]')
     .replace(/(https?:\/\/)[^\s/]+@/gi, '$1[REDACTED]@')

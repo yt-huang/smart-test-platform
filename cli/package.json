@@ -3,7 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
-  "bin": { "platform": "src/index.js" },
-  "scripts": { "test": "node --test test/*.test.js", "start": "node src/index.js" }
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "platform": "src/index.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "saxes": "6.0.0"
+  }
 }
