@@ -27,6 +27,14 @@ The platform SHALL match capability declarations, maintain priority/FIFO queue o
 - **WHEN** no resource satisfies a run's capabilities until its queue deadline
 - **THEN** the run becomes timed out without claiming an execution occurred
 
+#### Scenario: Browser version contains numeric components
+- **WHEN** a Chromium resource reports version `156.0.8078.4` and a run requires version `>=1`
+- **THEN** the platform compares numeric version components and considers the version requirement satisfied
+
+#### Scenario: Equal priority queue uses chronological time
+- **WHEN** equal-priority runs have creation timestamps with different fractional-second precision
+- **THEN** the earlier instant is assigned first regardless of its timestamp's textual representation
+
 ### Requirement: Authenticated evidence and role enforcement
 The platform SHALL require authentication for reports and evidence and SHALL enforce the ADMIN, TESTER, DEVELOPER and VIEWER role matrix on mutations. Agent evidence uploads MUST belong to its assigned run.
 
