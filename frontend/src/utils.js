@@ -13,6 +13,12 @@ export const platformLabels = { web: 'Web 浏览器', android: 'Android', ios: '
 export const splitTags = (value) => [...new Set(value.split(/[,，]/).map(x => x.trim()).filter(Boolean))];
 export const isTerminal = (status) => !activeStatuses.includes(status);
 
+export function caseApprovalBody(item) {
+  const revision = item.revision;
+  if (!Number.isSafeInteger(revision) || revision < 1) throw new Error('当前用例缺少有效版本号，请刷新后重新审核。');
+  return { revision };
+}
+
 export function validateSteps(steps) {
   if (!steps.length) return '至少添加一个测试步骤。';
   for (let i = 0; i < steps.length; i++) {

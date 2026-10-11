@@ -13,7 +13,9 @@ async function handleFailure(response) {
     setToken(null);
     window.dispatchEvent(new Event('platform:session-expired'));
   }
-  throw new Error(message);
+  const error = new Error(message);
+  error.status = response.status;
+  throw error;
 }
 
 export async function api(path, options = {}) {

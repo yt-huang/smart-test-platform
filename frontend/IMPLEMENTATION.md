@@ -27,3 +27,9 @@ Hash routes work on Codespaces and static serving without deep-link fallback. Ex
 - `npm test`: 4 tests passed (authoring roles, authenticated evidence origin isolation, executable structured step validation, capability tag normalization).
 
 API integration, browser screenshots/responsive review, complete real execution and deployment are pending root integration and independent acceptance. This report does not claim those checks passed. No fabricated run results, device feeds, model integrations or cost figures were added.
+
+## Independent acceptance fix: case approval revision race
+
+Approval POST now carries the revision of the case content displayed in the review dialog. Missing or invalid revisions are blocked. HTTP 409 invalidates the previous confirmation and disables approval until the reviewer explicitly refreshes the case, inspects its latest content and checks the human confirmation again. Refresh never submits approval or changes draft content. API errors retain HTTP status for this conflict handling. The backend is responsible for an atomic compare-and-approve transaction.
+
+Validation for this fix: `npm test` 5/5 passed; `npm run build` passed. Browser/API race verification remains for root independent acceptance.

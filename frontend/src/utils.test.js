@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canWrite, resolveEvidenceUrl, validateSteps, splitTags } from './utils.js';
+import { canWrite, caseApprovalBody, resolveEvidenceUrl, validateSteps, splitTags } from './utils.js';
 
 test('only authoring roles can make write controls available', () => {
   for (const role of ['ADMIN', 'TESTER', 'DEVELOPER']) assert.equal(canWrite(role), true);
@@ -20,4 +20,11 @@ test('structured steps require executable URLs, selectors and text', () => {
 });
 test('capability tags are trimmed and deduplicated', () => {
   assert.deepEqual(splitTags(' smoke,， smoke, private '), ['smoke', 'private']);
+});
+test('approval carries precisely the displayed revision and rejects an absent revision', () => {
+  assert.deepEqual(caseApprovalBody({ id: 'case-1', revision: 4 }), { revision: 4 });
+  assert.deepEqual(caseApprovalBody({ id: 'case-1', revision: 5 }), { revision: 5 });
+  for (const revision of [undefined, null, 0, -1, 1.5, '4', Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => caseApprovalBody({ revision }), /版本号/);
+  }
 });
