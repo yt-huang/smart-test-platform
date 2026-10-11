@@ -27,11 +27,12 @@
 .browser-check.on{border-color:#bfe0d5;background:var(--teal-soft);color:var(--teal-dark)}
 .junit-action{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
 .junit-action small{font-size:9px}
-.fingerprint-inline{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:#718e9e;max-width:280px;overflow-wrap:anywhere}
-.fingerprint-inline>svg{flex:none;color:#9caeb8}
+.fingerprint-lines{display:grid;grid-template-columns:1fr 1fr;gap:7px 14px;margin:0;min-width:220px}
+.fingerprint-lines dt{font-size:9px!important;color:#9caeb8!important;margin-bottom:2px!important}
+.fingerprint-lines dd{font-size:10px!important;color:#718e9e!important;margin:0;overflow-wrap:anywhere}
 .fingerprint-empty{display:inline-flex;align-items:center;gap:5px;font-size:10px}
 .variant-message{max-width:200px;overflow-wrap:anywhere}
 .poll-label.inline{margin-left:8px}
 .readonly-note{margin:4px 2px 0;font-size:10px}
 @media(max-width:1250px){.matrix-metrics{grid-template-columns:repeat(3,1fr)}.matrix-metrics>div:nth-child(3){border-right:0}}
-@media(max-width:800px){.matrix-metrics{grid-template-columns:1fr 1fr}.matrix-metrics>div:nth-child(even){border-right:0}.matrix-metrics>div:nth-child(3){border-right:1px solid var(--border)}.fingerprint-inline{max-width:200px}}
+@media(max-width:800px){.matrix-metrics{grid-template-columns:1fr 1fr}.matrix-metrics>div:nth-child(even){border-right:0}.matrix-metrics>div:nth-child(3){border-right:1px solid var(--border)}.fingerprint-lines{min-width:0;grid-template-columns:1fr}}

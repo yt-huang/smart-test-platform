@@ -6,6 +6,27 @@ export const matrixBrowsers = [
 export const matrixActiveStatuses = ['QUEUED', 'RUNNING'];
 export const isMatrixActive = (status) => matrixActiveStatuses.includes(status);
 
+const MATRIX_NAME_SUFFIX = ' 矩阵回归';
+export function defaultMatrixName(planName) {
+  const base = String(planName || '').trim();
+  if (!base) return MATRIX_NAME_SUFFIX.trim();
+  return base.length + MATRIX_NAME_SUFFIX.length > 150 ? base.slice(0, 150 - MATRIX_NAME_SUFFIX.length) + MATRIX_NAME_SUFFIX : base + MATRIX_NAME_SUFFIX;
+}
+
+const scalarText = (value) => typeof value === 'string' && value.trim() ? value.trim() : typeof value === 'number' && Number.isFinite(value) ? String(value) : '';
+export function matrixFingerprintLines(fingerprint) {
+  if (!fingerprint || typeof fingerprint !== 'object' || Array.isArray(fingerprint)) {
+    const scalar = scalarText(fingerprint);
+    return scalar ? [{ label: '资源指纹', value: scalar }] : [];
+  }
+  return [
+    { label: '浏览器', value: scalarText(fingerprint.browser) || '尚未获取' },
+    { label: '版本', value: scalarText(fingerprint.version) || scalarText(fingerprint.os) || '尚未获取' },
+    { label: '来源', value: scalarText(fingerprint.provider) || '尚未获取' },
+    { label: '资源标识', value: scalarText(fingerprint.name) || scalarText(fingerprint.id) || '尚未获取' },
+  ];
+}
+
 export function buildMatrixPayload({ planId, name = '', commitSha = '', variants = [] }) {
   if (!planId) throw new Error('请先选择一个测试计划。');
   if (!Array.isArray(variants) || variants.length < 2) throw new Error('至少选择两个浏览器目标。');
