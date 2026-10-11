@@ -198,6 +198,18 @@ class GateIntegrationTest {
         assertTrue(service.list("quality").isEmpty(),"Failed cleanup must not record an assertion quality sample");
     }
 
+    @Test void legacyFailedLateDoneAndExistingCompletionCanNeverBeCertifiedPassed() throws Exception {
+        enroll(false); var c=approved("Legacy failed late done"); var run=submit(c);
+        var legacy=store.get("run",str(run,"id")); legacy.put("status","FAILED"); legacy.put("finishedAt",now()); legacy.remove("_gateSubmission"); store.save("run",legacy);
+        // Old assignment retains its lease, and there is no gate read before the new completion arrives.
+        done(run,c,"PASSED"); assertEquals("FAILED",service.get("run",str(run,"id")).get("status"));
+        assertEquals("BLOCKED",gate(run).get("status")); assertEquals("strict-legacy-v1",gate(run).get("policy")); assertEquals(0,gate(run).get("passed"));
+        String frozen=service.gateJunit(str(run,"id"),"admin"); counters(xml(frozen),2,1,0,1);
+        // Also cover a historical record that already has the new completion facts but no frozen gate.
+        var mixed=store.get("run",str(run,"id")); mixed.remove("_gate"); mixed.remove("_gateExport"); store.save("run",mixed);
+        assertEquals(1,gate(run).get("passed")); assertEquals("BLOCKED",gate(run).get("status")); counters(suite(run),2,0,0,1);
+    }
+
     @Test void matrixSharesSubmissionSnapshotAndAggregatesPendingWarnAndBlocked() throws Exception {
         enroll(true); var c=approved("Matrix isolation"); isolate(c); var matrix=matrix(c);
         assertEquals("aggregate-v1",cast(matrix.get("gate")).get("policy")); assertEquals("PENDING",cast(matrix.get("gate")).get("status"));

@@ -52,7 +52,9 @@ $env:JAVA_HOME = 'D:/code/ai-test/tools/java/jdk-21.0.12.1+1'
 & 'D:/code/ai-test/tools/java/apache-maven-3.9.9/bin/mvn.cmd' -q verify
 ```
 
-退出 0。最终 Surefire：GateIntegrationTest 17、MatrixIntegrationTest 21、PlatformIntegrationTest 17，共 55 个测试；失败 0、错误 0、跳过 0，完成 jar 打包。`git diff --check` 退出 0。
+退出 0。首次最终 Surefire：GateIntegrationTest 17、MatrixIntegrationTest 21、PlatformIntegrationTest 17，共 55 个测试；失败 0、错误 0、跳过 0，完成 jar 打包。`git diff --check` 退出 0。
+
+主控只读检查提出历史 FAILED 在已经有新 `_completion`、却没有提交/导出快照时必须仍保守阻塞。补入独立 `LEGACY_NON_PASSED` 守卫，并增加历史 FAILED 晚到全 PASSED 和已存在完整新 completion 的测试；重新使用同一 `-q verify` 命令验证，退出 0：新增 gate 测试 18，共 56 个，失败/错误/跳过均为 0。
 
 新增场景覆盖首个 EWMA flip/下一次 WARN、客户端快照注入、人工释放/审批编辑/删除、混合通过/隔离/阻塞计数、SKIPPED/TIMED_OUT/隐式 FAILED、缺结果、清理缺失/失败、四类显式基础设施错误、数组/enum/ID 负向验证、done envelope 矛盾、取消/执行超时晚到 done 冻结、排队超时/断线/启动恢复、严格历史兼容、矩阵共享集合/聚合/晚到冻结及所有角色与未登录 API 权限。现有用例继续覆盖真实事务锁、回滚无发送和 afterCommit 传输故障恢复。
 

@@ -24,6 +24,8 @@ final class RunGate {
         var raw=objects(run.get("results")); var snapshots=objects(run.get("_cases"));
         var errors=new ArrayList<String>();
         if(terminal) {
+            // A post-deployment completion can add evidence, never certify a pre-existing failed task.
+            if(legacy&&hasCompletion&&!"PASSED".equals(run.get("status"))) errors.add("LEGACY_NON_PASSED");
             if(hasCompletion) {
                 errors.addAll(strings(completion.get("infrastructureErrors")));
                 if(!Boolean.TRUE.equals(completion.get("cleanupProvided"))) errors.add("CLEANUP_NOT_CONFIRMED");
