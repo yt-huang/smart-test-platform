@@ -1,0 +1,58 @@
+name: Platform acceptance
+on:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PLATFORM_ADMIN_PASSWORD: ci-acceptance-only-long-password
+      PLATFORM_URL: http://127.0.0.1:8080
+      AGENT_ID: ci-browser
+      AGENT_WORK_DIR: /tmp/platform-agent
+      AGENT_KEY_FILE: /tmp/platform-agent/key.json
+      AGENT_ALLOW_PRIVATE_NETWORK: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Build portal
+        working-directory: frontend
+        run: npm ci && npm run build
+      - name: Test browser Agent and CLI
+        run: |
+          npm ci --prefix agent
+          npm test --prefix agent
+          npm ci --prefix cli
+          npm test --prefix cli
+          npx --prefix agent playwright install --with-deps chromium
+      - name: Test and package central platform
+        run: |
+          mkdir -p backend/src/main/resources/static
+          cp -R frontend/dist/. backend/src/main/resources/static/
+          mvn -B -f backend/pom.xml verify
+      - name: Verify real browser execution and authorization
+        run: |
+          java -jar backend/target/*.jar > /tmp/platform-backend.log 2>&1 &
+          npm start --prefix agent > /tmp/platform-agent.log 2>&1 &
+          node scripts/verify-e2e.mjs
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-diagnostics
+          path: |
+            /tmp/platform-backend.log
+            /tmp/platform-agent.log
+            backend/target/surefire-reports
