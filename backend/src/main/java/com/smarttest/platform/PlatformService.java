@@ -157,6 +157,7 @@ public class PlatformService {
                 "executionTimeoutSeconds",bounded(defaults,"executionTimeoutSeconds",300,1,86400),"commitSha",text(in,"commitSha","",128),"createdBy",actor,
                 "results",new ArrayList<>(),"logs",new ArrayList<>(),"summary",map("passed",0,"failed",0,"total",ids.size(),"durationMs",0),"message","Waiting for matching resource",
                 "_cases",snapshots,"sensitive",snapshots.stream().anyMatch(c->bool(c,"sensitive",false))));
+        run.put("_gateSubmission",RunGate.submission(ids,store.list("quality")));
         store.save("run",run); audit(actor,"CREATE_RUN",str(run,"id"),str(run,"name")); tick(); return publicDocument("run",store.get("run",str(run,"id")));
     }
     public synchronized Map<String,Object> cancelRun(String id,String actor) {
@@ -204,6 +205,7 @@ public class PlatformService {
             variants.add(map("label",label,"capabilities",caps));
         }
         var matrix=base("matrix"); matrix.putAll(map("name",name,"planId",planId,"commitSha",commit,"createdBy",actor,"variants",variants));
+        var gateSubmission=RunGate.submission(ids,store.list("quality"));
         var runs=new ArrayList<Map<String,Object>>();
         for(var variant:variants) {
             String suffix=" ["+str(variant,"label")+"]";
@@ -213,6 +215,7 @@ public class PlatformService {
                     "queueTimeoutSeconds",queueTimeout,"executionTimeoutSeconds",executionTimeout,"commitSha",commit,"createdBy",actor,
                     "matrixId",matrix.get("id"),"matrixLabel",variant.get("label"),"results",new ArrayList<>(),"logs",new ArrayList<>(),
                     "summary",map("passed",0,"failed",0,"total",ids.size(),"durationMs",0),"message","Waiting for matching resource","_cases",snapshots,"sensitive",sensitive));
+            run.put("_gateSubmission",gateSubmission);
             variant.put("runId",run.get("id")); runs.add(run);
         }
         for(var run:runs) store.save("run",run);
@@ -240,7 +243,7 @@ public class PlatformService {
         int completed=0,passedVariants=0,failedVariants=0,total=0,passed=0,failed=0;
         for(var reference:objects(matrix.get("variants"))) {
             var run=store.get("run",str(reference,"runId")); runs.add(run); var summary=cast(run.get("summary"));
-            var variant=map("label",reference.get("label"),"capabilities",reference.get("capabilities"),"runId",run.get("id"),"status",run.get("status"),"summary",summary,"message",run.get("message"));
+            var variant=map("label",reference.get("label"),"capabilities",reference.get("capabilities"),"runId",run.get("id"),"status",run.get("status"),"summary",summary,"message",run.get("message"),"gate",runGate(run));
             if(run.containsKey("deviceFingerprint")) variant.put("deviceFingerprint",run.get("deviceFingerprint"));
             variants.add(variant);
             if(terminal(run)) completed++;
@@ -253,7 +256,8 @@ public class PlatformService {
         Instant end=completed<runs.size()?Instant.now():runs.stream().map(r->Instant.parse(str(r,"finishedAt"))).max(Comparator.naturalOrder()).orElse(Instant.parse(str(matrix,"createdAt")));
         long duration=Math.max(0,Duration.between(Instant.parse(str(matrix,"createdAt")),end).toMillis());
         return map("id",matrix.get("id"),"name",matrix.get("name"),"planId",matrix.get("planId"),"commitSha",matrix.get("commitSha"),"createdBy",matrix.get("createdBy"),"createdAt",matrix.get("createdAt"),"status",status,
-                "summary",map("totalVariants",runs.size(),"completedVariants",completed,"passedVariants",passedVariants,"failedVariants",failedVariants,"total",total,"passed",passed,"failed",failed,"durationMs",duration),"variants",variants);
+                "summary",map("totalVariants",runs.size(),"completedVariants",completed,"passedVariants",passedVariants,"failedVariants",failedVariants,"total",total,"passed",passed,"failed",failed,"durationMs",duration),"variants",variants,
+                "gate",RunGate.aggregate(variants.stream().map(v->cast(v.get("gate"))).toList(),completed==runs.size()));
     }
     public synchronized Map<String,Object> cancelMatrix(String id,String actor) {
         var matrix=store.get("matrix",id); boolean cancelled=false;
@@ -401,12 +405,18 @@ public class PlatformService {
     }
     private void complete(Map<String,Object> run,Map<String,Object> device,Map<String,Object> message,String agent) {
         boolean eligibleQuality=!terminal(run);
+        // Legacy terminal runs also acquire their conservative frozen export before any late evidence.
+        if(terminal(run)) freezeGate(run);
         var results=objects(message.get("results")); if(results.size()>200) throw ApiException.bad("Too many results");
-        var expected=strings(run.get("caseIds")); Set<String> seen=new HashSet<>(); List<Map<String,Object>> verified=new ArrayList<>(); int passed=0,failed=0; long duration=0;
+        if(message.containsKey("infrastructureErrors")&&!(message.get("infrastructureErrors") instanceof List<?>)) throw ApiException.bad("Expected infrastructureErrors array");
+        var infrastructureErrors=strings(message.get("infrastructureErrors"));
+        if(infrastructureErrors.size()>20||infrastructureErrors.stream().anyMatch(e->e.length()>100||!Set.of("EXECUTOR_FAILED","CASE_VALIDATION_FAILED","EXECUTION_ABORTED","EVIDENCE_UPLOAD_FAILED").contains(e))) throw ApiException.bad("Invalid infrastructureErrors");
+        var expected=strings(run.get("caseIds")); Set<String> seen=new LinkedHashSet<>(),explicitStatus=new LinkedHashSet<>(); List<Map<String,Object>> verified=new ArrayList<>(); int passed=0,failed=0; long duration=0;
         var cases=objects(run.get("_cases"));
         for(var result:results) {
             String caseId=required(result,"caseId",128); if(!expected.contains(caseId)||!seen.add(caseId)) throw ApiException.bad("Unexpected or duplicate case result");
             String status=choice(result,"status","FAILED",Set.of("PASSED","FAILED","SKIPPED","TIMED_OUT"));
+            if(result.get("status") instanceof String) explicitStatus.add(caseId);
             long ms=bounded(result,"durationMs",0,0,Integer.MAX_VALUE); duration+=ms;
             List<Map<String,Object>> evidence=new ArrayList<>();
             for(var reference:objects(result.get("evidence"))) {
@@ -420,15 +430,19 @@ public class PlatformService {
         }
         for(String id:expected) if(!seen.contains(id)) { var c=cases.stream().filter(x->id.equals(x.get("id"))).findFirst().orElseThrow(); verified.add(map("caseId",id,"name",c.get("name"),"status","FAILED","durationMs",0,"error","Agent returned no result","steps",List.of(),"evidence",List.of())); failed++; }
         boolean cleaned=bool(message,"cleanupOk",false);
+        String reportedStatus=message.containsKey("status")?choice(message,"status","",Set.of("PASSED","FAILED","CANCELLED","TIMED_OUT")):"";
+        boolean consistentStatus=!Set.of("CANCELLED","TIMED_OUT").contains(reportedStatus)&&!("FAILED".equals(reportedStatus)&&failed==0);
         run.put("completionReceived",true); run.put("results",verified); run.put("summary",map("passed",passed,"failed",failed,"total",expected.size(),"durationMs",duration));
+        run.put("_completion",map("suppliedCaseIds",new ArrayList<>(seen),"explicitStatusCaseIds",new ArrayList<>(explicitStatus),
+                "cleanupProvided",message.get("cleanupOk") instanceof Boolean,"cleanupOk",cleaned,"reportedStatus",reportedStatus,"infrastructureErrors",new ArrayList<>(infrastructureErrors)));
         var logs=strings(message.get("logs")); if(logs.size()>2000||logs.stream().anyMatch(s->s.length()>4000)) throw ApiException.bad("Logs exceed permitted size");
         var existingLogs=new ArrayList<>(strings(run.get("logs"))); existingLogs.addAll(logs); run.put("logs",existingLogs.stream().limit(2000).toList());
         if(!terminal(run)) {
             run.put("status","CLEANING"); store.save("run",run); device.put("status","CLEANING"); store.save("device",device);
-            finish(run,failed==0&&passed==expected.size()&&cleaned?"PASSED":"FAILED",cleaned?(failed==0?"All approved cases passed":"One or more cases failed"):"Resource cleanup failed; device quarantined");
+            finish(run,failed==0&&passed==expected.size()&&cleaned&&infrastructureErrors.isEmpty()&&consistentStatus?"PASSED":"FAILED",cleaned?(failed==0?"All approved cases passed":"One or more cases failed"):"Resource cleanup failed; device quarantined");
         } else store.save("run",run);
         device.put("status",cleaned&&!bool(device,"adminMaintenance",false)?"IDLE":"MAINTENANCE"); device.put("quarantined",!cleaned); device.remove("taskId"); store.save("device",device);
-        if(eligibleQuality) recordQuality(run,verified,seen);
+        if(eligibleQuality&&cleaned&&consistentStatus&&infrastructureErrors.isEmpty()&&seen.size()==expected.size()&&explicitStatus.containsAll(expected)) recordQuality(run,verified,explicitStatus);
         audit(agent,"COMPLETE_RUN",str(run,"id"),"Validated results; cleanupOk="+cleaned);
     }
     public synchronized void disconnect(String session) {
@@ -496,7 +510,15 @@ public class PlatformService {
         };
     }
     private void quarantine(Map<String,Object> run,String status) { var d=store.get("device",str(run,"deviceId")); d.put("status",status); d.put("quarantined",true); d.put("cleaningAt",now()); store.save("device",d); }
-    private void finish(Map<String,Object> run,String status,String message) { run.put("status",status); run.put("finishedAt",now()); run.put("message",message); store.save("run",run); }
+    private void finish(Map<String,Object> run,String status,String message) { run.put("status",status); run.put("finishedAt",now()); run.put("message",message); freezeGate(run); store.save("run",run); }
+    private void freezeGate(Map<String,Object> run) {
+        if(!terminal(run)||run.containsKey("_gate")) return;
+        var snapshot=RunGate.snapshot(run); run.put("_gate",snapshot.get("gate")); run.put("_gateExport",snapshot);
+    }
+    private Map<String,Object> runGate(Map<String,Object> run) {
+        if(terminal(run)&&!run.containsKey("_gate")) { freezeGate(run); store.save("run",run); }
+        return run.get("_gate") instanceof Map<?,?>?cast(run.get("_gate")):cast(RunGate.snapshot(run).get("gate"));
+    }
     private void send(String agent,Map<String,Object> message) {
         String session=connections.get(agent); if(session==null) return;
         Runnable dispatch=()->{
@@ -529,6 +551,24 @@ public class PlatformService {
     public synchronized String junit(String id) {
         var run=store.get("run",id);
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"+junitSuite(run,str(run,"name"));
+    }
+    public synchronized String gateJunit(String id,String actor) {
+        var run=store.get("run",id);
+        if(!terminal(run)) throw new ApiException(HttpStatus.CONFLICT,"Run is still active");
+        runGate(run);
+        audit(actor,"EXPORT_GATE_JUNIT",id,"Frozen run gate report");
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"+RunGate.junitSuite(cast(run.get("_gateExport")));
+    }
+    public synchronized String matrixGateJunit(String id,String actor) {
+        var matrix=store.get("matrix",id); var details=matrixDetails(matrix);
+        if(!terminal(details)) throw new ApiException(HttpStatus.CONFLICT,"Matrix is still active");
+        var suites=new ArrayList<String>(); int tests=0,failures=0,skipped=0,errors=0;
+        for(var variant:objects(matrix.get("variants"))) {
+            var run=store.get("run",str(variant,"runId")); runGate(run); var snapshot=cast(run.get("_gateExport")); var counts=RunGate.junitCounts(snapshot);
+            tests+=counts[0]; failures+=counts[1]; skipped+=counts[2]; errors+=counts[3]; suites.add(RunGate.junitSuite(snapshot));
+        }
+        audit(actor,"EXPORT_MATRIX_GATE_JUNIT",id,"Frozen gate reports for "+suites.size()+" variants");
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites name=\""+escape(str(matrix,"name"))+"\" tests=\""+tests+"\" failures=\""+failures+"\" skipped=\""+skipped+"\" errors=\""+errors+"\" time=\""+((Number)cast(details.get("summary")).get("durationMs")).longValue()/1000.0+"\">"+String.join("",suites)+"</testsuites>";
     }
     public synchronized String matrixJunit(String id,String actor) {
         var matrix=store.get("matrix",id); var details=matrixDetails(matrix);
@@ -598,7 +638,7 @@ public class PlatformService {
         var metric=store.get("quality",caseId); String reason=required(in,"reason",1000); if(reason.strip().length()<5)throw ApiException.bad("Provide a meaningful review reason");
         metric.putAll(map("quarantined",false,"releasedBy",actor,"releasedAt",now(),"releaseReason",reason,"updatedAt",now())); store.save("quality",metric); audit(actor,"RELEASE_QUALITY_QUARANTINE",caseId,reason); return publicDocument("quality",metric);
     }
-    private static String escape(String value) {
+    static String escape(String value) {
         StringBuilder valid=new StringBuilder();
         value.codePoints().filter(c->c==9||c==10||c==13||c>=0x20&&c<=0xD7FF||c>=0xE000&&c<=0xFFFD||c>=0x10000&&c<=0x10FFFF).forEach(valid::appendCodePoint);
         return valid.toString().replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;").replace("'","&apos;");
@@ -629,6 +669,8 @@ public class PlatformService {
     private Map<String,Object> publicUser(Map<String,Object> u) { return map("id",u.get("id"),"username",u.get("username"),"displayName",u.get("displayName"),"role",u.get("role")); }
     private Map<String,Object> publicDocument(String kind,Map<String,Object> value) {
         if(kind.equals("user")) return publicUser(value);
-        var out=new LinkedHashMap<>(value); out.keySet().removeIf(k->k.startsWith("_")||Set.of("passwordHash","keyHash","taskId","adminMaintenance","path","completionReceived").contains(k)||kind.equals("device")&&k.equals("quarantined")); return out;
+        var out=new LinkedHashMap<>(value); out.keySet().removeIf(k->k.startsWith("_")||Set.of("passwordHash","keyHash","taskId","adminMaintenance","path","completionReceived").contains(k)||kind.equals("device")&&k.equals("quarantined"));
+        if(kind.equals("run")) out.put("gate",runGate(value));
+        return out;
     }
 }

@@ -44,12 +44,14 @@ public class ApiController {
     @PostMapping("/runs") public Object createRun(@RequestBody Map<String,Object> in,HttpServletRequest req) { return service.createRun(in,actor(req)); }
     @PostMapping("/runs/{id}/cancel") public Object cancel(@PathVariable String id,HttpServletRequest req) { return service.cancelRun(id,actor(req)); }
     @GetMapping(value="/runs/{id}/junit",produces="application/xml") public Object junit(@PathVariable String id) { return service.junit(id); }
+    @GetMapping(value="/runs/{id}/gate-junit",produces="application/xml") public Object gateJunit(@PathVariable String id,HttpServletRequest req) { return service.gateJunit(id,actor(req)); }
     @GetMapping("/runs/{id}/allure") public Object allure(@PathVariable String id) { return service.allure(id); }
     @GetMapping("/matrices") public Object matrices() { return service.listMatrices(); }
     @GetMapping("/matrices/{id}") public Object matrix(@PathVariable String id) { return service.matrix(id); }
     @PostMapping("/matrices") public Object createMatrix(@RequestBody Map<String,Object> in,HttpServletRequest req) { return service.createMatrix(in,actor(req)); }
     @PostMapping("/matrices/{id}/cancel") public Object cancelMatrix(@PathVariable String id,HttpServletRequest req) { return service.cancelMatrix(id,actor(req)); }
     @GetMapping(value="/matrices/{id}/junit",produces="application/xml") public Object matrixJunit(@PathVariable String id,HttpServletRequest req) { return service.matrixJunit(id,actor(req)); }
+    @GetMapping(value="/matrices/{id}/gate-junit",produces="application/xml") public Object matrixGateJunit(@PathVariable String id,HttpServletRequest req) { return service.matrixGateJunit(id,actor(req)); }
     @GetMapping("/agents") public Object agents() { return service.list("agent"); }
     @GetMapping("/devices") public Object devices() { return service.list("device"); }
     @PutMapping("/devices/{id}") public Object device(@PathVariable String id,@RequestBody Map<String,Object> in,HttpServletRequest req) { return service.updateDevice(id,in,actor(req)); }
