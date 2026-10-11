@@ -33,3 +33,7 @@ API integration, browser screenshots/responsive review, complete real execution 
 Approval POST now carries the revision of the case content displayed in the review dialog. Missing or invalid revisions are blocked. HTTP 409 invalidates the previous confirmation and disables approval until the reviewer explicitly refreshes the case, inspects its latest content and checks the human confirmation again. Refresh never submits approval or changes draft content. API errors retain HTTP status for this conflict handling. The backend is responsible for an atomic compare-and-approve transaction.
 
 Validation for this fix: `npm test` 5/5 passed; `npm run build` passed. Browser/API race verification remains for root independent acceptance.
+
+## Independent acceptance fix: structured resource fingerprint
+
+Run reports now format the backend's `deviceFingerprint` public device document into explicit name, model/browser, platform, OS/version, provider and Agent fields. The formatter returns scalar strings for every rendered value and supports null/malformed fields plus legacy string fingerprints, preventing React object-child crashes. Regression uses the actual public device shape. `npm test` 6/6 passed; `npm run build` passed.

@@ -13,6 +13,21 @@ export const platformLabels = { web: 'Web 浏览器', android: 'Android', ios: '
 export const splitTags = (value) => [...new Set(value.split(/[,，]/).map(x => x.trim()).filter(Boolean))];
 export const isTerminal = (status) => !activeStatuses.includes(status);
 
+const fieldText = (value, fallback = '未上报') => typeof value === 'string' && value.trim() ? value : typeof value === 'number' && Number.isFinite(value) ? String(value) : fallback;
+export function fingerprintDetails(fingerprint) {
+  if (!fingerprint || typeof fingerprint !== 'object' || Array.isArray(fingerprint)) return [{ label: '资源指纹', value: fieldText(fingerprint, '尚未获取') }];
+  const platform = fieldText(fingerprint.platform);
+  const model = [fingerprint.brand, fingerprint.model, fingerprint.browser].map(value => fieldText(value, '')).filter(Boolean).join(' / ');
+  return [
+    { label: '设备名称', value: fieldText(fingerprint.name, fieldText(fingerprint.id)) },
+    { label: '型号 / 浏览器', value: model || '未上报' },
+    { label: '平台', value: platformLabels[platform] || platform },
+    { label: '系统 / 版本', value: fieldText(fingerprint.os, fieldText(fingerprint.version)) },
+    { label: '资源来源', value: fieldText(fingerprint.provider) },
+    { label: '所属 Agent', value: fieldText(fingerprint.agentId) },
+  ];
+}
+
 export function caseApprovalBody(item) {
   const revision = item.revision;
   if (!Number.isSafeInteger(revision) || revision < 1) throw new Error('当前用例缺少有效版本号，请刷新后重新审核。');
