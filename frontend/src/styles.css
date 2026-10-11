@@ -58,6 +58,8 @@
 .gate-metrics .gate-quarantined{color:#b98a2e}
 .gate-card-note{font-size:9px;color:#a2b1b8;line-height:1.8;margin:0}
 .gate-empty{margin-bottom:23px}
+.gate-invalid{margin-bottom:23px;background:#fff5f4;border-color:#f7ddd9;color:#ba5c57}
+.gate-badge-invalid{font-size:10px;color:#c9585c;white-space:nowrap}
 .status-pending{background:#ebf3fe;color:#4a80bf}
 .status-warn{background:#fff6e8;color:#bb8b34}
 .status-blocked{background:#fff0f0;color:#c9585c}
