@@ -14,7 +14,9 @@
 
 默认名称来自计划时截取到 150 字符；明确提供的名称超过上限则拒绝。子任务名必须保留目标标签并保证总长不超过 200。终态墙钟以最晚 finishedAt 固定，查询不能延长历史耗时。即使用例结果全部 PASSED，只要 run 因资源清理等基础设施原因 FAILED，JUnit 仍必须增加独立 infrastructure error。
 
-质量分数仍汇总各用例执行次数；同 commit 的 verdict flip 比较必须同时具有相同执行环境签名（platform/browser/version/provider/brand/model），记录 lastEnvironment。不同浏览器的稳定差异不能当作 flaky，不贡献 flip/EWMA；相同环境的既有 EWMA 与人工解除语义保持有效。本次不扩展完整多环境 flaky 仓库。
+质量分数仍汇总各用例执行次数；同 commit 的 verdict flip 比较必须同时具有相同执行环境签名（取实际 deviceFingerprint 的 platform/browser/version/provider/brand/model），记录 lastEnvironment，并有界保存各环境最近的 commit/verdict，避免 A→B→A 交错丢失 A 的比较基线。不同浏览器的稳定差异不能当作 flaky，不贡献 flip/EWMA；相同环境的既有 EWMA 与人工解除语义保持有效。本次不扩展完整多环境 flaky 仓库。
+
+实际 Agent 分配发送必须在数据库事务提交成功后发生，提交失败不能仅回滚记录而留下已下发任务。可复用事务 afterCommit 延迟实际发送，且不得在已提交事务回调中继续写数据库。
 
 ## 门户契约
 
