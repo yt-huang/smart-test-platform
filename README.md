@@ -4,6 +4,8 @@
 
 ## GitHub Codespaces
 
+已部署的验收工作区：[打开工作区](https://smart-test-platform-7r7vvpp6gqqhp96j.github.dev) · [访问平台](https://smart-test-platform-7r7vvpp6gqqhp96j-8080.app.github.dev)。端口为私有，需要所有者 GitHub 登录；工作区需保持运行。实际云端验收见 [交付记录](docs/delivery.md)。
+
 1. 在仓库 **Code → Codespaces → Create codespace on main** 创建工作区；仓库内 `.devcontainer/devcontainer.json` 自动安装运行环境并构建应用。
 2. 首次容器构建需要下载依赖和浏览器。完成后在 **Ports** 打开 **8080**，登录平台。
 3. 管理员用户名为 `admin`；在 Codespaces 终端运行 `node scripts/admin-password.mjs` 查看本工作区随机生成的密码。

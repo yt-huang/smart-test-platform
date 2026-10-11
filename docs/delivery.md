@@ -25,13 +25,25 @@ Android ADB 发现和 W3C Appium 执行适配器已实现并通过协议夹具�
 
 最终本地成功运行 `run-028c43c2-2b6a-4cb7-9241-9ab4196f71e8`，故意失败运行 `run-8dad483a-aca7-46ec-8786-dd3de184b70d`；成功报告产生五份真实证据，全部十一项端到端检查通过。后端 `mvn verify` 通过 17 项测试，前端 7、Agent 14、实际 Chromium 2、CLI 5 项测试通过。运行输出保存在忽略提交的工作目录中，未提交密码和令牌。
 
-GitHub Actions 的 `375ac46` 已成功完成前端构建、Agent/CLI 测试、Java 测试与打包、实际浏览器端到端验收：<https://github.com/yt-huang/smart-test-platform/actions/runs/38134517026>。最终集成提交的检查结果将在完成部署后补充。
+GitHub `main` 的应用及环境集成版本 `54d52dc` 已通过完整 GitHub Actions：<https://github.com/yt-huang/smart-test-platform/actions/runs/38135116595>，包含前端构建、Agent/CLI 测试、Java 测试与打包、实际浏览器端到端验收。之后的交付记录和规格归档不改变应用代码。
 
 独立验收及复现步骤见 `docs/independent-acceptance.md`，最终本地结论为 PASS。四项发现均已由原实现者修复并由独立 Agent 复验：审核竞争、设备指纹界面渲染、多段资源版本比较、时间戳 FIFO。实际 `version>=1` 执行 `run-57a6a4d8-3ae9-4204-a786-6a666a98cf35` 在 Chromium `156.0.8078.4` 上通过并恢复资源 IDLE。
 
 ## Codespaces 状态
 
-工作区 `smart-test-platform-7r7vvpp6gqqhp96j` 已创建，完整源码通过 Git bundle 与 SSH 同步，正在按 `.devcontainer/devcontainer.json` 重建。应用地址、PostgreSQL/Agent 实际检查和云端运行编号在部署验收完成后补充；当前不能将这些列为已验证。
+部署与验收日期：2026-10-11。工作区 `smart-test-platform-7r7vvpp6gqqhp96j` 已按 `.devcontainer` 重建，Java 21、Node 22.23.3、Docker 29.8.2、Compose 2.40.3 可用。源码通过 Git bundle 与 SSH 同步到 `54d52dc`，此后交付记录与规格归档也同步到同一工作区。GitHub `main` 已发布集成代码。
+
+- 工作区：<https://smart-test-platform-7r7vvpp6gqqhp96j.github.dev>
+- 平台：<https://smart-test-platform-7r7vvpp6gqqhp96j-8080.app.github.dev>
+- 端口 8080 为 private，已在登录 GitHub 的 Chrome 中实际访问平台、登录并看到真实执行数据。
+- 平台和 PostgreSQL 容器健康；实际查询确认 PostgreSQL 16.15；数据库未映射公网端口。
+- 浏览器资源 `codespace-browser-chromium` 实际报告 Chromium `156.0.8078.4`，Agent `codespace-browser` 在线并完成真实执行。
+- 云端 `ACCEPTANCE_TARGET_URL=http://host.docker.internal:8091/ node scripts/verify-e2e.mjs` 全部十一项通过。成功报告 `run-d4419b98-e45f-4628-8978-6759b49d7d2e`，故意失败报告 `run-eb9f9b5e-d7fd-474a-a9a2-d9e372b7f348`；成功报告的五份证据均非空且匿名访问被拒绝。
+- 停止平台与 Agent、重启 PostgreSQL、再启动全部服务后，重新登录验证两条用例、四条运行和成功报告仍在；五份证据下载长度一致；同一 Agent 与设备重新连接并恢复 IDLE。此为重启持久性验收，尚未替代异地灾难恢复演练。
+
+初次环境验证暴露基础 Java 镜像的未使用 Yarn apt 源签名失效、缺少 SSH 与 Git LFS；已移除该可选源，并在开发容器配置中加入 SSH 与 Git LFS。保留软件包签名验证；实际工作区也已安装 Git LFS 并完成精确源码同步。首次应用构建、postCreate 与 postStart 的真实创建日志均显示成功。
+
+管理员用户名为 `admin`。在上述工作区终端执行 `node scripts/admin-password.mjs` 查看该工作区的随机密码；密码不写入交付文档、Git 或截图。工作区停止后从工作区链接重新启动，再打开平台。
 
 ## 仍需接入或后续实施
 
