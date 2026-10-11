@@ -1,0 +1,26 @@
+[
+  {
+    "name": "Browser sign-in updates the welcome message",
+    "description": "A real browser fills and submits the local acceptance form. Replace __TARGET_URL__ with a target reachable from the Agent.",
+    "platform": "web", "framework": "playwright", "suite": "smoke", "status": "DRAFT", "priority": "P0", "tags": ["demo", "acceptance"], "sensitive": false,
+    "steps": [
+      { "action": "goto", "target": "__TARGET_URL__/" },
+      { "action": "expectText", "target": "h1", "value": "Browser acceptance target" },
+      { "action": "fill", "target": "#username", "value": "qa" },
+      { "action": "click", "target": "#login" },
+      { "action": "expectText", "target": "#welcome", "value": "Welcome qa" },
+      { "action": "screenshot", "target": "" }
+    ]
+  },
+  {
+    "name": "Next case receives a fresh browser session",
+    "description": "Previous case wrote localStorage; a fresh isolated context must still show Guest session.",
+    "platform": "web", "framework": "playwright", "suite": "smoke", "status": "DRAFT", "priority": "P1", "tags": ["demo", "isolation"], "sensitive": false,
+    "steps": [
+      { "action": "goto", "target": "__TARGET_URL__/" },
+      { "action": "expectVisible", "target": "#login-form" },
+      { "action": "expectText", "target": "#welcome", "value": "Guest session" },
+      { "action": "screenshot", "target": "#login-form" }
+    ]
+  }
+]
