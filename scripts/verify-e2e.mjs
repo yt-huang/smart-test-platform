@@ -41,7 +41,7 @@ try {
   assert.equal(good.status, 'DRAFT');
   const rejected = await fetch(`${base}/api/runs`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ caseIds: [good.id], capabilities: { platform: 'web', browser: 'chromium' } }) });
   assert.ok([400, 409, 422].includes(rejected.status), 'Unreviewed draft cannot run');
-  await api(`/cases/${good.id}/approve`, 'POST', {});
+  await api(`/cases/${good.id}/approve`, 'POST', { revision: good.revision });
   const plan = await api('/plans', 'POST', { name: `Acceptance smoke ${stamp}`, caseIds: [good.id], capabilities: { platform: 'web', browser: 'chromium', provider: 'local' }, queueTimeoutSeconds: 20, executionTimeoutSeconds: 30 }, 200);
   const run = await api('/runs', 'POST', { planId: plan.id, commitSha: process.env.GITHUB_SHA || 'local-acceptance' }, 200);
   const terminal = new Set(['PASSED', 'FAILED', 'TIMED_OUT', 'CANCELLED']);
@@ -64,7 +64,7 @@ try {
   assert.match(await xml.text(), /<testsuite/);
   await api(`/runs/${run.id}/allure`);
   const bad = await api('/cases', 'POST', { name: `Acceptance FAIL ${stamp}`, platform: 'web', framework: 'playwright', suite: 'regression', priority: 'P1', steps: [{ action: 'goto', target: targetUrl }, { action: 'expectText', target: 'h1', value: 'This assertion must fail' }] });
-  await api(`/cases/${bad.id}/approve`, 'POST', {});
+  await api(`/cases/${bad.id}/approve`, 'POST', { revision: bad.revision });
   const failed = await api('/runs', 'POST', { caseIds: [bad.id], capabilities: { platform: 'web', browser: 'chromium' }, executionTimeoutSeconds: 20, queueTimeoutSeconds: 20 });
   const failedResult = await waitFor(async () => { const r = await api(`/runs/${failed.id}`); return terminal.has(r.status) && r; }, 'deliberate failing execution');
   assert.equal(failedResult.status, 'FAILED');

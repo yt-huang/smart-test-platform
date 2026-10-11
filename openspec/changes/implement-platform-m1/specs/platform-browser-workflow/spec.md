@@ -9,6 +9,10 @@ The platform SHALL persist cases, revision history and plans in a workspace-scop
 - **WHEN** a user submits a run containing an unapproved case
 - **THEN** the platform rejects the run with a clear error without assigning a resource
 
+#### Scenario: Another editor changes reviewed content
+- **WHEN** a reviewer submits approval for a revision that another editor has changed
+- **THEN** approval returns HTTP 409, leaves the current case as a draft and requires explicit review of its current revision
+
 ### Requirement: Actual isolated browser execution
 An outbound authenticated Agent SHALL execute approved structured Playwright steps in an isolated browser context and return actual verdicts, errors and evidence. Unsupported mobile and model dependencies MUST be identified explicitly.
 

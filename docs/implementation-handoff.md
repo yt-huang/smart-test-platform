@@ -14,7 +14,7 @@ All routes under `/api`. JSON request/response, failures `{message}`. List endpo
 
 `GET /dashboard` -> `{totalCases,totalPlans,totalRuns,passRate,onlineAgents,availableDevices,runningRuns,queuedRuns,recentRuns,trend:[{date,passed,failed}],platformStatus}`.
 
-`GET/POST /cases`; `PUT/DELETE /cases/{id}`. Case: `{id,name,description,platform:'web'|'android'|'ios',framework:'playwright'|'appium'|'maestro',suite:'smoke'|'regression',status:'DRAFT'|'APPROVED',priority:'P0'|'P1'|'P2',tags:[],sensitive:false,steps:[{action:'goto'|'click'|'fill'|'expectText'|'expectVisible'|'screenshot',target,value}],createdAt,updatedAt}`. Only APPROVED cases may enter a run. `POST /cases/{id}/approve` human review. Retain revision history server-side; `GET /cases/{id}/history` array. No arbitrary script execution from portal.
+`GET/POST /cases`; `PUT/DELETE /cases/{id}`. Case: `{id,name,description,platform:'web'|'android'|'ios',framework:'playwright'|'appium'|'maestro',suite:'smoke'|'regression',status:'DRAFT'|'APPROVED',priority:'P0'|'P1'|'P2',tags:[],sensitive:false,steps:[{action:'goto'|'click'|'fill'|'expectText'|'expectVisible'|'screenshot',target,value}],revision,createdAt,updatedAt}`. Only APPROVED cases may enter a run. `POST /cases/{id}/approve {revision}` human review atomically checks the revision the reviewer saw; stale revision returns 409 and requires reviewing current content. Missing revision is invalid. Retain revision history server-side; `GET /cases/{id}/history` array. No arbitrary script execution from portal.
 
 `GET/POST /plans`; `PUT/DELETE /plans/{id}`. Plan: `{id,name,description,caseIds:[],capabilities:{platform:'web',browser:'chromium',provider:'local',tags:[]},priority:0,queueTimeoutSeconds:600,executionTimeoutSeconds:300,createdAt}`.
 
