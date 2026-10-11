@@ -1,5 +1,6 @@
 package com.smarttest.platform;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +30,7 @@ import java.util.regex.Pattern;
 public class PlatformService {
     private static final Pattern VERSION_REQUIREMENT=Pattern.compile("^(>=|<=|==|=|>|<)?\\s*(\\d+(?:\\.\\d+)*)$");
     private final DocumentStore store;
+    @Autowired private ObjectMapper json;
     @Autowired private PlatformTransactionManager transactionManager;
     private final BCryptPasswordEncoder passwords=new BCryptPasswordEncoder(12);
     private final SecureRandom random=new SecureRandom();
@@ -405,37 +407,52 @@ public class PlatformService {
     }
     private void complete(Map<String,Object> run,Map<String,Object> device,Map<String,Object> message,String agent) {
         boolean eligibleQuality=!terminal(run);
-        // Legacy terminal runs also acquire their conservative frozen export before any late evidence.
-        if(terminal(run)) freezeGate(run);
         var results=objects(message.get("results")); if(results.size()>200) throw ApiException.bad("Too many results");
         if(message.containsKey("infrastructureErrors")&&!(message.get("infrastructureErrors") instanceof List<?>)) throw ApiException.bad("Expected infrastructureErrors array");
         var infrastructureErrors=strings(message.get("infrastructureErrors"));
         if(infrastructureErrors.size()>20||infrastructureErrors.stream().anyMatch(e->e.length()>100||!Set.of("EXECUTOR_FAILED","CASE_VALIDATION_FAILED","EXECUTION_ABORTED","EVIDENCE_UPLOAD_FAILED").contains(e))) throw ApiException.bad("Invalid infrastructureErrors");
         var expected=strings(run.get("caseIds")); Set<String> seen=new LinkedHashSet<>(),explicitStatus=new LinkedHashSet<>(); List<Map<String,Object>> verified=new ArrayList<>(); int passed=0,failed=0; long duration=0;
         var cases=objects(run.get("_cases"));
+        var timeWindow=EvidenceTimeline.window(run,Instant.now());
         for(var result:results) {
             String caseId=required(result,"caseId",128); if(!expected.contains(caseId)||!seen.add(caseId)) throw ApiException.bad("Unexpected or duplicate case result");
             String status=choice(result,"status","FAILED",Set.of("PASSED","FAILED","SKIPPED","TIMED_OUT"));
             if(result.get("status") instanceof String) explicitStatus.add(caseId);
             long ms=bounded(result,"durationMs",0,0,Integer.MAX_VALUE); duration+=ms;
+            var timing=EvidenceTimeline.optionalTiming(result,timeWindow,"Case");
+            var steps=new ArrayList<Map<String,Object>>();
+            for(var step:objects(result.get("steps"))) {
+                var checked=new LinkedHashMap<>(step);
+                var stepTiming=EvidenceTimeline.optionalTiming(step,timeWindow,"Step");
+                if(stepTiming!=null) {
+                    if(timing==null) throw ApiException.bad("Step timing requires case timing");
+                    EvidenceTimeline.contains(timing,stepTiming,"Step timing"); checked.put("timing",stepTiming);
+                }
+                steps.add(checked);
+            }
             List<Map<String,Object>> evidence=new ArrayList<>();
             for(var reference:objects(result.get("evidence"))) {
                 var stored=store.get("evidence",required(reference,"id",128));
                 if(!run.get("id").equals(stored.get("taskId"))) throw ApiException.forbidden("Evidence belongs to another task");
+                EvidenceTimeline.reference(stored,caseId,timing);
                 evidence.add(publicDocument("evidence",stored));
             }
             var test=cases.stream().filter(c->caseId.equals(c.get("id"))).findFirst().orElseThrow();
-            verified.add(map("caseId",caseId,"name",test.get("name"),"status",status,"durationMs",ms,"error",text(result,"error","",10000),"steps",objects(result.get("steps")),"evidence",evidence));
+            var checked=map("caseId",caseId,"name",test.get("name"),"status",status,"durationMs",ms,"error",text(result,"error","",10000),"steps",steps,"evidence",evidence);
+            if(timing!=null) checked.put("timing",timing);
+            verified.add(checked);
             if(status.equals("PASSED")) passed++; else failed++;
         }
         for(String id:expected) if(!seen.contains(id)) { var c=cases.stream().filter(x->id.equals(x.get("id"))).findFirst().orElseThrow(); verified.add(map("caseId",id,"name",c.get("name"),"status","FAILED","durationMs",0,"error","Agent returned no result","steps",List.of(),"evidence",List.of())); failed++; }
         boolean cleaned=bool(message,"cleanupOk",false);
         String reportedStatus=message.containsKey("status")?choice(message,"status","",Set.of("PASSED","FAILED","CANCELLED","TIMED_OUT")):"";
         boolean consistentStatus=!Set.of("CANCELLED","TIMED_OUT").contains(reportedStatus)&&!("FAILED".equals(reportedStatus)&&failed==0);
+        var logs=strings(message.get("logs")); if(logs.size()>2000||logs.stream().anyMatch(s->s.length()>4000)) throw ApiException.bad("Logs exceed permitted size");
+        // Preserve a terminal gate's original facts before accepting valid late results.
+        if(terminal(run)) freezeGate(run);
         run.put("completionReceived",true); run.put("results",verified); run.put("summary",map("passed",passed,"failed",failed,"total",expected.size(),"durationMs",duration));
         run.put("_completion",map("suppliedCaseIds",new ArrayList<>(seen),"explicitStatusCaseIds",new ArrayList<>(explicitStatus),
                 "cleanupProvided",message.get("cleanupOk") instanceof Boolean,"cleanupOk",cleaned,"reportedStatus",reportedStatus,"infrastructureErrors",new ArrayList<>(infrastructureErrors)));
-        var logs=strings(message.get("logs")); if(logs.size()>2000||logs.stream().anyMatch(s->s.length()>4000)) throw ApiException.bad("Logs exceed permitted size");
         var existingLogs=new ArrayList<>(strings(run.get("logs"))); existingLogs.addAll(logs); run.put("logs",existingLogs.stream().limit(2000).toList());
         if(!terminal(run)) {
             run.put("status","CLEANING"); store.save("run",run); device.put("status","CLEANING"); store.save("device",device);
@@ -535,17 +552,31 @@ public class PlatformService {
         } else dispatch.run();
     }
     public synchronized Map<String,Object> uploadEvidence(String agentKey,String taskId,MultipartFile file) {
+        return uploadEvidence(agentKey,taskId,file,null);
+    }
+    public synchronized Map<String,Object> uploadEvidence(String agentKey,String taskId,MultipartFile file,String captureJson) {
         var k=key(agentKey); String agent=str(k,"agentId"); var run=store.get("run",taskId);
         if(!agent.equals(run.get("agentId"))||terminal(run)||!connections.containsKey(agent)) throw ApiException.forbidden("Evidence requires a current owned assignment");
         var device=store.get("device",str(run,"deviceId")); if(!taskId.equals(device.get("taskId"))) throw ApiException.forbidden("Resource lease is no longer owned");
         if(file.isEmpty()||file.getSize()>100L*1024*1024) throw ApiException.bad("Evidence size must be 1 byte..100 MiB");
+        String contentType=Objects.toString(file.getContentType(),"application/octet-stream");
+        var capture=EvidenceTimeline.capture(json,captureJson,contentType,run,Instant.now());
         var record=base("evidence"); String id=str(record,"id");
         String supplied=file.getOriginalFilename(); String name=(supplied==null?"evidence":supplied).replace('\\','/'); name=name.substring(name.lastIndexOf('/')+1).replaceAll("[\\p{Cntrl}]",""); if(name.length()>200)name=name.substring(0,200);
-        String contentType=Objects.toString(file.getContentType(),"application/octet-stream");
         Path root=Path.of(evidencePath).toAbsolutePath().normalize(), path=root.resolve(id).normalize(); if(!path.startsWith(root)) throw ApiException.bad("Invalid evidence path");
-        try { Files.copy(file.getInputStream(),path,StandardCopyOption.REPLACE_EXISTING); } catch(Exception e) { throw new IllegalStateException("Cannot persist evidence",e); }
+        try(var input=file.getInputStream()) { Files.copy(input,path); }
+        catch(Exception e) { deleteEvidenceFile(path); throw new IllegalStateException("Cannot persist evidence",e); }
+        if(TransactionSynchronizationManager.isSynchronizationActive()&&TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCompletion(int status) { if(status!=STATUS_COMMITTED) deleteEvidenceFile(path); }
+            });
+        }
+        if(capture!=null) record.put("capture",capture);
         record.putAll(map("taskId",taskId,"agentId",agent,"name",name,"contentType",contentType,"size",file.getSize(),"url","/api/evidence/"+id,"path",path.toString())); store.save("evidence",record);
         audit(agent,"UPLOAD_EVIDENCE",taskId,id); return publicDocument("evidence",record);
+    }
+    private static void deleteEvidenceFile(Path path) {
+        try { Files.deleteIfExists(path); } catch(java.io.IOException e) { throw new IllegalStateException("Cannot remove uncommitted evidence",e); }
     }
     public synchronized Map<String,Object> evidence(String id,String actor) { var record=store.get("evidence",id); audit(actor,"DOWNLOAD_EVIDENCE",str(record,"taskId"),id); return record; }
     public synchronized String junit(String id) {

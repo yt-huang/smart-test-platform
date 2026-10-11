@@ -64,7 +64,7 @@ public class ApiController {
         return service.list("audit").stream().filter(a->actor==null||actor.equals(a.get("actor"))).filter(a->target==null||target.equals(a.get("target"))).filter(a->action==null||action.equals(a.get("action"))).toList();
     }
     @PostMapping(value="/agent/evidence",consumes=MediaType.MULTIPART_FORM_DATA_VALUE)
-    public Object upload(@RequestHeader("X-Agent-Key") String key,@RequestParam String taskId,@RequestPart MultipartFile file) { return service.uploadEvidence(key,taskId,file); }
+    public Object upload(@RequestHeader("X-Agent-Key") String key,@RequestParam String taskId,@RequestPart MultipartFile file,@RequestParam(required=false) String capture) { return service.uploadEvidence(key,taskId,file,capture); }
     @GetMapping("/evidence/{id}") public ResponseEntity<FileSystemResource> evidence(@PathVariable String id,HttpServletRequest req) {
         var evidence=service.evidence(id,actor(req));
         String contentType=PlatformService.str(evidence,"contentType");
