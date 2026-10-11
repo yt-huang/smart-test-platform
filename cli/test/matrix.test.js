@@ -150,6 +150,58 @@ test('matrix API errors, malformed details and inconsistent early success return
   assert.equal(await runCommand(['matrix', '--plan', 'p1', '--browsers', 'chromium,firefox'], env, { ...silent, fetchImpl: async () => new Response('not-json') }), 2);
 });
 
+test('passed matrix targets require nonempty fully passed summaries before success or XML export', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'platform-matrix-cli-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  for (const summary of [{ total: 1, passed: 0, failed: 1 }, { total: 0, passed: 0, failed: 0 }, { total: 2, passed: 1, failed: 0 }]) {
+    const value = matrix('PASSED');
+    for (const variant of value.variants) variant.summary = { ...summary };
+    value.summary = { ...value.summary, total: summary.total * 2, passed: summary.passed * 2, failed: summary.failed * 2 };
+    let calls = 0;
+    const code = await runCommand(['matrix', '--plan', 'p1', '--browsers', 'chromium,firefox', '--junit', path.join(directory, 'invalid.xml')], env, {
+      ...silent, fetchImpl: async () => { calls++; return json(value); }
+    });
+    assert.equal(code, 2, JSON.stringify(summary));
+    assert.equal(calls, 1, 'Invalid success must not trigger a JUnit download');
+  }
+  const partial = matrix('RUNNING', ['PASSED', 'QUEUED']);
+  partial.variants[0].summary = { total: 1, passed: 0, failed: 1 };
+  partial.summary = { ...partial.summary, passed: 0, failed: 1 };
+  assert.equal(await runCommand(['matrix', '--plan', 'p1', '--browsers', 'chromium,firefox'], env, { ...silent, fetchImpl: async () => json(partial) }), 2);
+});
+
+test('matrix aggregate counts must exactly equal target totals for every lifecycle state', async () => {
+  const values = [
+    { ...matrix('PASSED'), summary: { total: 3, passed: 2, failed: 0 } },
+    { ...matrix('PASSED'), summary: { total: 2, passed: 1, failed: 0 } },
+    { ...matrix('FAILED', ['PASSED', 'FAILED']), summary: { total: 2, passed: 1, failed: 0 } },
+    { ...matrix('RUNNING', ['PASSED', 'RUNNING']), summary: { total: 2, passed: 1, failed: 0 } }
+  ];
+  for (const value of values) {
+    let calls = 0;
+    const code = await runCommand(['matrix', '--plan', 'p1', '--browsers', 'chromium,firefox'], env, {
+      ...silent, fetchImpl: async () => { calls++; return json(value); }
+    });
+    assert.equal(code, 2, JSON.stringify(value.summary));
+    assert.equal(calls, 1, 'Inconsistent count responses must stop polling');
+  }
+});
+
+test('infrastructure failure keeps exit one even when all case counts are passed', async () => {
+  const value = matrix('FAILED', ['PASSED', 'FAILED']);
+  value.variants[1].summary = { total: 1, passed: 1, failed: 0 };
+  value.variants[1].message = 'Browser agent disconnected during cleanup';
+  value.summary = { ...value.summary, passed: 2, failed: 0 };
+  const outputs = [];
+  const code = await runCommand(['matrix', '--plan', 'p1', '--browsers', 'chromium,firefox'], env, {
+    ...silent, out: value => outputs.push(value), fetchImpl: async () => json(value)
+  });
+  assert.equal(code, 1);
+  assert.ok(outputs.includes('firefox: FAILED (1 passed, 0 failed, 1 total)'));
+  assert.ok(outputs.includes('FAILED: 2 passed, 0 failed, 2 total'));
+  assert.ok(outputs.some(value => value.includes('Browser agent disconnected during cleanup')));
+});
+
 test('failure XML can be exported only after all targets reach terminal state', async t => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'platform-matrix-cli-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

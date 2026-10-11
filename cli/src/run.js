@@ -51,8 +51,10 @@ function validateExecution(execution, command, options, expectedId) {
     throw new ConfigurationError(`Platform did not return a valid ${command} ID/status`);
   }
   if (command !== 'matrix') return;
-  const validSummary = summary => summary && ['total', 'passed', 'failed'].every(key => Number.isInteger(summary[key]) && summary[key] >= 0)
+  const countKeys = ['total', 'passed', 'failed'];
+  const validSummary = summary => summary && countKeys.every(key => Number.isInteger(summary[key]) && summary[key] >= 0)
     && summary.passed + summary.failed <= summary.total;
+  const fullyPassed = summary => summary.total > 0 && summary.passed === summary.total && summary.failed === 0;
   if (!validSummary(execution.summary)) throw new ConfigurationError('Platform returned invalid matrix summary');
   if (!Array.isArray(execution.variants) || execution.variants.length !== options.browsers.length) throw new ConfigurationError('Platform returned invalid matrix targets');
   const labels = new Set(), runIds = new Set();
@@ -60,9 +62,14 @@ function validateExecution(execution, command, options, expectedId) {
     if (!variant || !options.browsers.includes(variant.label) || labels.has(variant.label) || typeof variant.runId !== 'string' || !variant.runId.trim() || runIds.has(variant.runId) || !runStatuses.has(variant.status) || !validSummary(variant.summary)) {
       throw new ConfigurationError('Platform returned invalid matrix targets');
     }
+    if (variant.status === 'PASSED' && !fullyPassed(variant.summary)) throw new ConfigurationError('Platform returned inconsistent passed target summary');
     labels.add(variant.label);
     runIds.add(variant.runId);
   }
+  if (countKeys.some(key => execution.summary[key] !== execution.variants.reduce((sum, variant) => sum + variant.summary[key], 0))) {
+    throw new ConfigurationError('Platform returned inconsistent matrix summary counts');
+  }
+  if (execution.status === 'PASSED' && !fullyPassed(execution.summary)) throw new ConfigurationError('Platform returned inconsistent passed matrix summary');
   const allTerminal = execution.variants.every(variant => terminal.has(variant.status));
   if (terminal.has(execution.status) !== allTerminal) throw new ConfigurationError('Platform returned inconsistent matrix completion status');
   if (allTerminal) {
