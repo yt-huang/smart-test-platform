@@ -1,0 +1,4 @@
+interface:
+  display_name: "SaaS 多 Agent 协作"
+  short_description: "按职责协调多个 Agent 完成需求、设计、代码实现和独立验收"
+  default_prompt: "使用 $saas-multi-agent 在当前项目完成一个功能：主控统筹，Codex 子 Agent 实现，独立 Agent 验收；按需结合 Figma 和 OpenSpec。"

@@ -75,6 +75,19 @@ node scripts/verify-e2e.mjs
 
 验收包含真实浏览器成功/失败执行、草稿审核门禁、证据鉴权、报告导出、超时、取消、RBAC 和资源清理。GitHub Actions 自动执行相同闭环。
 
+已有真实通过执行后，可以保存基线并检查服务重启后的数据与证据。脚本从环境变量或当前目录的 `.env` 读取管理员密码，快照不保存登录凭据：
+
+```bash
+mkdir -p .data
+node scripts/verify-persistence.mjs baseline --snapshot .data/persistence.json
+docker compose stop browser-agent platform
+docker compose restart postgres
+docker compose up -d --wait --wait-timeout 120
+node scripts/verify-persistence.mjs check --snapshot .data/persistence.json
+```
+
+检查保留全部原用例、计划和运行 ID，核对通过报告的证据 SHA-256，并等待同一设备 IDLE、同一 Agent ONLINE；没有真实报告、记录丢失或附件改变都会失败。软件夹具测试使用 `node --test scripts/verify-persistence.test.mjs`；真实云端验证与独立验收见交付记录。
+
 ## 备份与恢复
 
 ```bash

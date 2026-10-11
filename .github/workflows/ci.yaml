@@ -28,6 +28,8 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
+      - name: Test deployment persistence verifier
+        run: node --test scripts/verify-persistence.test.mjs
       - name: Build portal
         working-directory: frontend
         run: npm ci && npm run build
@@ -48,6 +50,10 @@ jobs:
           java -jar backend/target/*.jar > /tmp/platform-backend.log 2>&1 &
           npm start --prefix agent > /tmp/platform-agent.log 2>&1 &
           node scripts/verify-e2e.mjs
+      - name: Check live reports and evidence integrity
+        run: |
+          node scripts/verify-persistence.mjs baseline --snapshot /tmp/platform-persistence.json
+          node scripts/verify-persistence.mjs check --snapshot /tmp/platform-persistence.json
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v4
