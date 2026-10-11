@@ -26,7 +26,7 @@ public class SecurityConfig {
             .requestMatchers(HttpMethod.GET,"/api/**").authenticated()
             .requestMatchers("/api/quality/**").hasAnyRole("ADMIN","TESTER")
             .requestMatchers("/api/users/**","/api/agent-keys/**","/api/devices/**").hasRole("ADMIN")
-            .requestMatchers("/api/cases/**","/api/plans/**","/api/runs/**").hasAnyRole("ADMIN","TESTER","DEVELOPER")
+            .requestMatchers("/api/cases/**","/api/plans/**","/api/runs/**","/api/matrices/**").hasAnyRole("ADMIN","TESTER","DEVELOPER")
             .requestMatchers("/api/**").denyAll().anyRequest().permitAll());
         http.exceptionHandling(e->e.authenticationEntryPoint((req,res,ex)->error(json,res,401,"Authentication required"))
             .accessDeniedHandler((req,res,ex)->{

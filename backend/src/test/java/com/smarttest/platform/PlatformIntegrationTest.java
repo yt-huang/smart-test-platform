@@ -8,6 +8,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import java.time.Instant;
@@ -18,12 +19,14 @@ import static com.smarttest.platform.PlatformService.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.*;
 
 @SpringBootTest(properties={"spring.datasource.url=jdbc:h2:mem:platformtest;MODE=PostgreSQL;DB_CLOSE_DELAY=-1", "platform.admin-password=TestAdminPassword123!", "platform.evidence-path=target/test-evidence", "platform.scheduler-delay-ms=3600000"})
 @AutoConfigureMockMvc
 class PlatformIntegrationTest {
     @Autowired PlatformService service;
-    @Autowired DocumentStore store;
+    @MockitoSpyBean DocumentStore store;
     @Autowired JdbcTemplate jdbc;
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
@@ -226,20 +229,20 @@ class PlatformIntegrationTest {
     @Test void serializationRetainsAllocationLockUntilTransactionCommit() throws Exception {
         enroll("a","s",List.of(target("d","local",List.of()))); var c=approved(false);
         CountDownLatch beforeCommit=new CountDownLatch(1),releaseCommit=new CountDownLatch(1); AtomicBoolean first=new AtomicBoolean(true); AtomicInteger assignments=new AtomicInteger();
-        service.transport((s,m)->{
-            if("assign".equals(m.get("type"))) {
-                assignments.incrementAndGet();
-                if(first.compareAndSet(true,false)) TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+        service.transport((s,m)->{ if("assign".equals(m.get("type"))) assignments.incrementAndGet(); },s->{});
+        doAnswer(invocation->{
+            invocation.callRealMethod();
+            if(first.compareAndSet(true,false)) TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                     @Override public void beforeCommit(boolean readOnly) { beforeCommit.countDown(); try { if(!releaseCommit.await(5,TimeUnit.SECONDS))throw new IllegalStateException("test latch timed out"); }catch(InterruptedException e){Thread.currentThread().interrupt();throw new RuntimeException(e);} }
-                });
-            }
-        },s->{});
+            });
+            return null;
+        }).when(store).save(eq("run"),anyMap());
         try(var executor=Executors.newVirtualThreadPerTaskExecutor()) {
             var one=executor.submit(()->submit(c)); assertTrue(beforeCommit.await(5,TimeUnit.SECONDS));
             var two=executor.submit(()->submit(c));
             Thread.sleep(150); assertFalse(two.isDone(),"Second scheduler must wait through first transaction commit");
             releaseCommit.countDown(); one.get(5,TimeUnit.SECONDS); var queued=two.get(5,TimeUnit.SECONDS);
             assertEquals(1,assignments.get()); assertEquals("QUEUED",queued.get("status"));
-        } finally { releaseCommit.countDown(); }
+        } finally { releaseCommit.countDown(); org.mockito.Mockito.reset(store); }
     }
 }

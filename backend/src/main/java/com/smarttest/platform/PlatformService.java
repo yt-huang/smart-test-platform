@@ -2,10 +2,16 @@ package com.smarttest.platform;
 
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.http.HttpStatus;
 import java.nio.file.*;
@@ -23,6 +29,7 @@ import java.util.regex.Pattern;
 public class PlatformService {
     private static final Pattern VERSION_REQUIREMENT=Pattern.compile("^(>=|<=|==|=|>|<)?\\s*(\\d+(?:\\.\\d+)*)$");
     private final DocumentStore store;
+    @Autowired private PlatformTransactionManager transactionManager;
     private final BCryptPasswordEncoder passwords=new BCryptPasswordEncoder(12);
     private final SecureRandom random=new SecureRandom();
     private final Map<String,String> connections=new HashMap<>();
@@ -160,6 +167,101 @@ public class PlatformService {
             quarantine(run,"CLEANING"); send(str(run,"agentId"),map("type","cancel","taskId",id,"reason","cancelled"));
         }
         audit(actor,"CANCEL_RUN",id,""); return publicDocument("run",run);
+    }
+    public synchronized Map<String,Object> createMatrix(Map<String,Object> in,String actor) {
+        String planId=required(in,"planId",128);
+        var plan=store.get("plan",planId);
+        var planCaps=capabilities(plan.get("capabilities"));
+        if(!"web".equals(planCaps.get("platform"))||in.containsKey("platform")&&!"web".equals(in.get("platform"))) throw ApiException.bad("A browser matrix requires a Web plan");
+        var ids=caseIds(plan.get("caseIds"),true);
+        var snapshots=ids.stream().map(id->store.get("case",id)).toList();
+        if(snapshots.stream().anyMatch(c->!"web".equals(c.get("platform")))) throw ApiException.bad("All matrix cases must be Web cases");
+        boolean sensitive=snapshots.stream().anyMatch(c->bool(c,"sensitive",false));
+        String defaultName=str(plan,"name"); defaultName=defaultName.substring(0,Math.min(defaultName.length(),150));
+        String name=text(in,"name",defaultName,150),commit=text(in,"commitSha","",128);
+        int priority=bounded(plan,"priority",0,0,100),queueTimeout=bounded(plan,"queueTimeoutSeconds",600,1,86400),executionTimeout=bounded(plan,"executionTimeoutSeconds",300,1,86400);
+        var requested=objects(in.get("variants"));
+        if(requested.size()<2||requested.size()>8) throw ApiException.bad("Choose 2..8 matrix variants");
+        var variants=new ArrayList<Map<String,Object>>(); Set<String> labels=new HashSet<>(); Set<Map<String,Object>> targets=new HashSet<>();
+        // No persistence, audit, scheduler or transport call may occur until the entire request validates.
+        for(var request:requested) {
+            String label=required(request,"label",Integer.MAX_VALUE).strip();
+            if(label.isBlank()||label.length()>80||!labels.add(label.toLowerCase(Locale.ROOT))) throw ApiException.bad("Variant labels must contain 1..80 characters and be unique");
+            if(!(request.get("capabilities") instanceof Map<?,?>)) throw ApiException.bad("Variant capabilities required");
+            var override=cast(request.get("capabilities"));
+            if(override.containsKey("platform")&&!"web".equals(override.get("platform"))) throw ApiException.bad("Matrix variants cannot change the Web platform");
+            String browser=required(override,"browser",100).strip().toLowerCase(Locale.ROOT);
+            if(!Set.of("chromium","firefox","webkit").contains(browser)) throw ApiException.bad("Invalid matrix browser");
+            var merged=new LinkedHashMap<>(planCaps); merged.putAll(override); merged.put("platform","web"); merged.put("browser",browser);
+            var caps=capabilities(merged);
+            if(sensitive&&!"local".equals(caps.get("provider"))) throw ApiException.bad("Sensitive cases cannot use cloud matrix targets");
+            if(caps.containsKey("version")) caps.put("version",normalizeMatrixVersion(str(caps,"version")));
+            var identity=new LinkedHashMap<>(caps); identity.put("tags",strings(caps.get("tags")).stream().sorted().toList());
+            for(String field:List.of("brand","model")) if(identity.containsKey(field)) identity.put(field,str(identity,field).toLowerCase(Locale.ROOT));
+            if("".equals(identity.get("version"))) identity.remove("version");
+            if(!targets.add(identity)) throw ApiException.bad("Matrix variants must have distinct normalized capabilities");
+            variants.add(map("label",label,"capabilities",caps));
+        }
+        var matrix=base("matrix"); matrix.putAll(map("name",name,"planId",planId,"commitSha",commit,"createdBy",actor,"variants",variants));
+        var runs=new ArrayList<Map<String,Object>>();
+        for(var variant:variants) {
+            String suffix=" ["+str(variant,"label")+"]";
+            String runName=name.substring(0,Math.min(name.length(),200-suffix.length()))+suffix;
+            var run=base("run"); run.put("createdAt",matrix.get("createdAt"));
+            run.putAll(map("name",runName,"planId",planId,"status","QUEUED","caseIds",ids,"capabilities",variant.get("capabilities"),"priority",priority,
+                    "queueTimeoutSeconds",queueTimeout,"executionTimeoutSeconds",executionTimeout,"commitSha",commit,"createdBy",actor,
+                    "matrixId",matrix.get("id"),"matrixLabel",variant.get("label"),"results",new ArrayList<>(),"logs",new ArrayList<>(),
+                    "summary",map("passed",0,"failed",0,"total",ids.size(),"durationMs",0),"message","Waiting for matching resource","_cases",snapshots,"sensitive",sensitive));
+            variant.put("runId",run.get("id")); runs.add(run);
+        }
+        for(var run:runs) store.save("run",run);
+        store.save("matrix",matrix);
+        for(var run:runs) audit(actor,"CREATE_RUN",str(run,"id"),str(run,"name"));
+        audit(actor,"CREATE_MATRIX",str(matrix,"id"),name);
+        tick();
+        return matrixDetails(matrix);
+    }
+    private static String normalizeMatrixVersion(String requirement) {
+        if(requirement.isBlank()) return "";
+        var parsed=VERSION_REQUIREMENT.matcher(requirement.strip());
+        if(!parsed.matches()) throw ApiException.bad("Invalid matrix version requirement");
+        var parts=new ArrayList<>(Arrays.stream(parsed.group(2).split("\\.")).map(p->new BigInteger(p).toString()).toList());
+        while(parts.size()>1&&parts.getLast().equals("0")) parts.removeLast();
+        String operator=Objects.toString(parsed.group(1),"=");
+        return (operator.equals("==")?"=":operator)+String.join(".",parts);
+    }
+    public synchronized List<Map<String,Object>> listMatrices() {
+        return store.list("matrix").stream().sorted(Comparator.comparing((Map<String,Object> m)->Instant.parse(str(m,"createdAt"))).reversed()).map(this::matrixDetails).toList();
+    }
+    public synchronized Map<String,Object> matrix(String id) { return matrixDetails(store.get("matrix",id)); }
+    private Map<String,Object> matrixDetails(Map<String,Object> matrix) {
+        var variants=new ArrayList<Map<String,Object>>(); var runs=new ArrayList<Map<String,Object>>();
+        int completed=0,passedVariants=0,failedVariants=0,total=0,passed=0,failed=0;
+        for(var reference:objects(matrix.get("variants"))) {
+            var run=store.get("run",str(reference,"runId")); runs.add(run); var summary=cast(run.get("summary"));
+            var variant=map("label",reference.get("label"),"capabilities",reference.get("capabilities"),"runId",run.get("id"),"status",run.get("status"),"summary",summary,"message",run.get("message"));
+            if(run.containsKey("deviceFingerprint")) variant.put("deviceFingerprint",run.get("deviceFingerprint"));
+            variants.add(variant);
+            if(terminal(run)) completed++;
+            if("PASSED".equals(run.get("status"))) passedVariants++;
+            if(Set.of("FAILED","TIMED_OUT").contains(str(run,"status"))) failedVariants++;
+            total+=number(summary,"total",0); passed+=number(summary,"passed",0); failed+=number(summary,"failed",0);
+        }
+        String status=completed<runs.size()?(runs.stream().allMatch(r->"QUEUED".equals(r.get("status")))?"QUEUED":"RUNNING"):
+                failedVariants>0?"FAILED":runs.stream().anyMatch(r->"CANCELLED".equals(r.get("status")))?"CANCELLED":"PASSED";
+        Instant end=completed<runs.size()?Instant.now():runs.stream().map(r->Instant.parse(str(r,"finishedAt"))).max(Comparator.naturalOrder()).orElse(Instant.parse(str(matrix,"createdAt")));
+        long duration=Math.max(0,Duration.between(Instant.parse(str(matrix,"createdAt")),end).toMillis());
+        return map("id",matrix.get("id"),"name",matrix.get("name"),"planId",matrix.get("planId"),"commitSha",matrix.get("commitSha"),"createdBy",matrix.get("createdBy"),"createdAt",matrix.get("createdAt"),"status",status,
+                "summary",map("totalVariants",runs.size(),"completedVariants",completed,"passedVariants",passedVariants,"failedVariants",failedVariants,"total",total,"passed",passed,"failed",failed,"durationMs",duration),"variants",variants);
+    }
+    public synchronized Map<String,Object> cancelMatrix(String id,String actor) {
+        var matrix=store.get("matrix",id); boolean cancelled=false;
+        for(var variant:objects(matrix.get("variants"))) {
+            String runId=str(variant,"runId");
+            if(!terminal(store.get("run",runId))) { cancelRun(runId,actor); cancelled=true; }
+        }
+        if(cancelled) audit(actor,"CANCEL_MATRIX",id,"Cancelled active variants");
+        return matrixDetails(matrix);
     }
     private List<String> caseIds(Object source,boolean approved) {
         var ids=strings(source); if(ids.isEmpty()||ids.size()>200||new HashSet<>(ids).size()!=ids.size()) throw ApiException.bad("Choose 1..200 distinct cases");
@@ -396,7 +498,18 @@ public class PlatformService {
     private void finish(Map<String,Object> run,String status,String message) { run.put("status",status); run.put("finishedAt",now()); run.put("message",message); store.save("run",run); }
     private void send(String agent,Map<String,Object> message) {
         String session=connections.get(agent); if(session==null) return;
-        try { sender.accept(session,message); } catch(Exception e) { disconnect(session); closer.accept(session); }
+        Runnable dispatch=()->{
+            if(!session.equals(connections.get(agent))) return;
+            try { sender.accept(session,message); }
+            catch(Exception e) {
+                // afterCommit must never mutate state using the transaction that already committed.
+                var recovery=new TransactionTemplate(transactionManager); recovery.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                recovery.executeWithoutResult(status->disconnect(session)); closer.accept(session);
+            }
+        };
+        if(TransactionSynchronizationManager.isSynchronizationActive()&&TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() { @Override public void afterCommit() { dispatch.run(); } });
+        } else dispatch.run();
     }
     public synchronized Map<String,Object> uploadEvidence(String agentKey,String taskId,MultipartFile file) {
         var k=key(agentKey); String agent=str(k,"agentId"); var run=store.get("run",taskId);
@@ -413,11 +526,33 @@ public class PlatformService {
     }
     public synchronized Map<String,Object> evidence(String id,String actor) { var record=store.get("evidence",id); audit(actor,"DOWNLOAD_EVIDENCE",str(record,"taskId"),id); return record; }
     public synchronized String junit(String id) {
-        var run=store.get("run",id); var results=objects(run.get("results")); int failed=(int)results.stream().filter(r->!"PASSED".equals(r.get("status"))).count();
-        boolean infrastructure=results.isEmpty()&&terminal(run)&&!"PASSED".equals(run.get("status"));
-        StringBuilder xml=new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuite name=\"").append(escape(str(run,"name"))).append("\" tests=\"").append(infrastructure?1:results.size()).append("\" failures=\"").append(failed).append("\" errors=\"").append(infrastructure?1:0).append("\" time=\"").append(number(cast(run.get("summary")),"durationMs",0)/1000.0).append("\">");
+        var run=store.get("run",id);
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"+junitSuite(run,str(run,"name"));
+    }
+    public synchronized String matrixJunit(String id,String actor) {
+        var matrix=store.get("matrix",id); var details=matrixDetails(matrix);
+        if(!terminal(details)) throw new ApiException(HttpStatus.CONFLICT,"Matrix is still active");
+        var suites=new ArrayList<String>(); int tests=0,failures=0,errors=0;
+        for(var variant:objects(matrix.get("variants"))) {
+            var run=store.get("run",str(variant,"runId")); var counts=junitCounts(run);
+            tests+=counts[0]; failures+=counts[1]; errors+=counts[2];
+            suites.add(junitSuite(run,str(run,"name")));
+        }
+        String xml="<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites name=\""+escape(str(matrix,"name"))+"\" tests=\""+tests+"\" failures=\""+failures+"\" errors=\""+errors+"\" time=\""+((Number)cast(details.get("summary")).get("durationMs")).longValue()/1000.0+"\">"+String.join("",suites)+"</testsuites>";
+        audit(actor,"EXPORT_MATRIX_JUNIT",id,"Aggregated "+suites.size()+" variants");
+        return xml;
+    }
+    private int[] junitCounts(Map<String,Object> run) {
+        var results=objects(run.get("results")); int failures=(int)results.stream().filter(r->!"PASSED".equals(r.get("status"))).count();
+        // A passing assertion does not erase a cancellation, timeout or failed resource cleanup.
+        boolean infrastructure=terminal(run)&&!"PASSED".equals(run.get("status"))&&(results.isEmpty()||failures==0||Set.of("CANCELLED","TIMED_OUT").contains(str(run,"status"))||str(run,"message").startsWith("Resource cleanup failed"));
+        return new int[]{results.size()+(infrastructure?1:0),failures,infrastructure?1:0};
+    }
+    private String junitSuite(Map<String,Object> run,String name) {
+        var results=objects(run.get("results")); var counts=junitCounts(run);
+        StringBuilder xml=new StringBuilder("<testsuite name=\"").append(escape(name)).append("\" tests=\"").append(counts[0]).append("\" failures=\"").append(counts[1]).append("\" errors=\"").append(counts[2]).append("\" time=\"").append(((Number)cast(run.get("summary")).get("durationMs")).longValue()/1000.0).append("\">");
         for(var r:results) { xml.append("<testcase classname=\"smarttest\" name=\"").append(escape(str(r,"name"))).append("\" time=\"").append(number(r,"durationMs",0)/1000.0).append("\">"); if(!"PASSED".equals(r.get("status"))) xml.append("<failure message=\"").append(escape(str(r,"error"))).append("\"/>"); xml.append("</testcase>"); }
-        if(infrastructure) xml.append("<testcase classname=\"smarttest.infrastructure\" name=\"execution\"><error message=\"").append(escape(str(run,"message"))).append("\"/></testcase>");
+        if(counts[2]>0) xml.append("<testcase classname=\"smarttest.infrastructure\" name=\"execution\"><error message=\"").append(escape(str(run,"message"))).append("\"/></testcase>");
         return xml.append("<system-out>").append(escape(String.join("\n",strings(run.get("logs"))))).append("</system-out></testsuite>").toString();
     }
     public synchronized Map<String,Object> allure(String id) {
@@ -434,21 +569,39 @@ public class PlatformService {
             if(!supplied.contains(id)||!Set.of("PASSED","FAILED").contains(verdict))continue;
             var metric=store.list("quality").stream().filter(q->id.equals(q.get("id"))).findFirst().orElse(map("id",id,"caseId",id,"workspaceId","default","createdAt",now(),"executions",0,"passed",0,"failed",0,"ewmaScore",0.0,"quarantined",false));
             double score=((Number)metric.get("ewmaScore")).doubleValue(); String commit=str(run,"commitSha");
-            boolean comparable=!commit.isBlank()&&commit.equals(metric.get("lastCommitSha"))&&!str(metric,"lastVerdict").isBlank();
-            boolean flip=comparable&&!verdict.equals(metric.get("lastVerdict"));
+            String environment=environmentSignature(run);
+            var environments=metric.get("_environmentHistory") instanceof Map<?,?>?new LinkedHashMap<>(cast(metric.get("_environmentHistory"))):new LinkedHashMap<String,Object>();
+            var previous=environments.get(environment) instanceof Map<?,?>?cast(environments.get(environment)):Map.<String,Object>of();
+            boolean comparable=!commit.isBlank()&&commit.equals(previous.get("commitSha"))&&!str(previous,"verdict").isBlank();
+            boolean flip=comparable&&!verdict.equals(previous.get("verdict"));
             if(comparable) score=Math.round((0.2*(flip?1:0)+0.8*score)*1_000_000.0)/1_000_000.0;
             if(flip&&score>=0.15&&!bool(metric,"quarantined",false)) {
                 metric.put("quarantined",true); metric.put("quarantinedAt",now()); metric.put("quarantineReason","Verdict changed for identical commit SHA; EWMA >= 0.15"); audit("quality","QUARANTINE_CASE",id,"EWMA="+score);
             }
-            metric.putAll(map("name",result.get("name"),"executions",number(metric,"executions",0)+1,"passed",number(metric,"passed",0)+(verdict.equals("PASSED")?1:0),"failed",number(metric,"failed",0)+(verdict.equals("FAILED")?1:0),"ewmaScore",score,"lastCommitSha",commit,"lastVerdict",verdict,"lastRunId",run.get("id"),"updatedAt",now()));
+            environments.remove(environment); environments.put(environment,map("commitSha",commit,"verdict",verdict));
+            while(environments.size()>64) environments.remove(environments.keySet().iterator().next());
+            metric.putAll(map("name",result.get("name"),"executions",number(metric,"executions",0)+1,"passed",number(metric,"passed",0)+(verdict.equals("PASSED")?1:0),"failed",number(metric,"failed",0)+(verdict.equals("FAILED")?1:0),"ewmaScore",score,"lastCommitSha",commit,"lastVerdict",verdict,"lastEnvironment",environment,"_environmentHistory",environments,"lastRunId",run.get("id"),"updatedAt",now()));
             store.save("quality",metric);
         }
     }
+    private static String environmentSignature(Map<String,Object> run) {
+        var fingerprint=run.get("deviceFingerprint") instanceof Map<?,?>?cast(run.get("deviceFingerprint")):Map.<String,Object>of();
+        var environment=new StringBuilder();
+        for(String field:List.of("platform","browser","version","provider","brand","model")) {
+            String value=str(fingerprint,field).strip().toLowerCase(Locale.ROOT);
+            environment.append(value.length()).append(':').append(value);
+        }
+        return hash(environment.toString());
+    }
     public synchronized Map<String,Object> releaseQuality(String caseId,Map<String,Object> in,String actor) {
         var metric=store.get("quality",caseId); String reason=required(in,"reason",1000); if(reason.strip().length()<5)throw ApiException.bad("Provide a meaningful review reason");
-        metric.putAll(map("quarantined",false,"releasedBy",actor,"releasedAt",now(),"releaseReason",reason,"updatedAt",now())); store.save("quality",metric); audit(actor,"RELEASE_QUALITY_QUARANTINE",caseId,reason); return metric;
+        metric.putAll(map("quarantined",false,"releasedBy",actor,"releasedAt",now(),"releaseReason",reason,"updatedAt",now())); store.save("quality",metric); audit(actor,"RELEASE_QUALITY_QUARANTINE",caseId,reason); return publicDocument("quality",metric);
     }
-    private static String escape(String value) { return value.replaceAll("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]","").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;").replace("'","&apos;"); }
+    private static String escape(String value) {
+        StringBuilder valid=new StringBuilder();
+        value.codePoints().filter(c->c==9||c==10||c==13||c>=0x20&&c<=0xD7FF||c>=0xE000&&c<=0xFFFD||c>=0x10000&&c<=0x10FFFF).forEach(valid::appendCodePoint);
+        return valid.toString().replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;").replace("'","&apos;");
+    }
 
     private static class LoginAttempts { int failures; Instant since=Instant.now(); }
     private static void validatePassword(String value) {
