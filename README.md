@@ -59,10 +59,23 @@ Agent 不监听入站端口，主动注册和续租；任务只按平台、浏�
 
 CLI 和 CI 用法见 [cli/README.md](cli/README.md)，执行协议与权限见 [docs/implementation-handoff.md](docs/implementation-handoff.md)，真实交付与验收状态见 [docs/delivery.md](docs/delivery.md)。
 
+## 浏览器矩阵回归
+
+在 Web 测试计划卡片选择“矩阵回归”，默认提交 Chromium 与 Firefox，可增加 WebKit。门户提供批次进度、各目标真实结果/资源指纹、原执行报告、取消与聚合 JUnit。REST 支持 2–8 个不同能力目标，所有用例必须已审批；无效目标不会留下部分任务。只有全部目标通过，批次才通过。
+
+Compose 的 Agent 会实际探测 Chromium、Firefox、WebKit，启动失败的引擎不会上报为空闲资源。本机 Agent 要先安装所选引擎，并设置 `AGENT_BROWSERS=chromium,firefox`；资源不足按原队列超时处理。
+
+```bash
+PLATFORM_URL=http://localhost:8080 PLATFORM_TOKEN="$TOKEN" node cli/src/index.js matrix --plan PLAN_ID --browsers chromium,firefox --junit matrix.xml
+```
+
+完整记录见 [矩阵回归交付](docs/matrix-delivery.md)。真机矩阵、设备预约与 Top 20 性能验收继续按原规格推进。
+
 ## 验收
 
 ```bash
 npm ci --prefix frontend
+npm test --prefix frontend
 npm run build --prefix frontend
 npm ci --prefix agent
 npm test --prefix agent
@@ -71,6 +84,8 @@ npm test --prefix cli
 mvn -f backend/pom.xml verify
 # 后端及真实浏览器 Agent 启动后
 node scripts/verify-e2e.mjs
+# Agent 启用并安装 Chromium + Firefox 后
+node scripts/verify-matrix.mjs
 ```
 
 验收包含真实浏览器成功/失败执行、草稿审核门禁、证据鉴权、报告导出、超时、取消、RBAC 和资源清理。GitHub Actions 自动执行相同闭环。

@@ -14,6 +14,8 @@
 
 ## M2 平台完整（对应 PRD M2）
 
+浏览器矩阵子集通过独立 `add-browser-regression-matrix` 变更实施，交付证据见 `docs/matrix-delivery.md`。T13 的设备预约、真机矩阵和 Top 20 验收仍未完成，因此保留整项未勾选。
+
 - [ ] T10 device-access（iOS）：Mac 节点 Agent、WDA 构建与证书托管、go-ios 设备操作
 - [ ] T11 remote-streaming：浏览器投屏操控（WSS 中转 H.264）、拖拽安装、实时日志流、截图/录屏导出
 - [ ] T12 远程 adb：平台网关鉴权中转 `platform adb connect`，命令审计
