@@ -124,7 +124,7 @@ export async function executeAndroidAssignment({ assignment, target, config, sig
   const cancelled = () => controller.abort(signal?.reason || new Error('Execution cancelled'));
   signal?.addEventListener('abort', cancelled, { once: true }); if (signal?.aborted) cancelled();
   const timer = setTimeout(() => controller.abort(new Error('Execution timeout exceeded')), (assignment.run.executionTimeoutSeconds || config.executionTimeoutSeconds) * 1000);
-  const results = [], logs = [], files = [];
+  const results = [], logs = [], files = [], infrastructureErrors = new Set();
   let cleanupOk = true;
   const log = line => { if (logs.length < 2000) logs.push(`${new Date().toISOString()} ${String(line).slice(0, 4000)}`); };
   try {
@@ -139,9 +139,11 @@ export async function executeAndroidAssignment({ assignment, target, config, sig
       };
       try {
         if (controller.signal.aborted) throw controller.signal.reason;
-        validateCase(testCase, { platform: 'android', framework: 'appium' });
+        try { validateCase(testCase, { platform: 'android', framework: 'appium' }); }
+        catch (error) { infrastructureErrors.add('CASE_VALIDATION_FAILED'); throw error; }
         progress(`Running Android ${testCase.name}`); log(`Case started: ${testCase.name}`);
-        await session.create(controller.signal);
+        try { await session.create(controller.signal); }
+        catch (error) { infrastructureErrors.add('EXECUTOR_FAILED'); throw error; }
         for (const [stepIndex, step] of testCase.steps.entries()) {
           if (controller.signal.aborted) throw controller.signal.reason;
           const outcome = { index: stepIndex, action: step.action, target: step.target || '', status: 'PASSED', durationMs: 0 }; result.steps.push(outcome);
@@ -185,6 +187,7 @@ export async function executeAndroidAssignment({ assignment, target, config, sig
     }
     for (const testCase of assignment.cases) if (!results.some(item => item.caseId === testCase.id)) results.push({ caseId: testCase.id, name: testCase.name, status: 'FAILED', error: 'Earlier Android cleanup failed; resource is quarantined', durationMs: 0, steps: [], evidence: [] });
   } finally { clearTimeout(timer); signal?.removeEventListener('abort', cancelled); }
+  if (controller.signal.aborted) infrastructureErrors.add('EXECUTION_ABORTED');
   const logFile = path.join(directory, 'execution.log'); await writeFile(logFile, logs.join('\n'));
   if (!cleanupOk && results.length) {
     const last = results.at(-1); last.status = 'FAILED'; last.error = `${last.error ? `${last.error}; ` : ''}Android resource cleanup failed; target quarantined`;
@@ -193,8 +196,8 @@ export async function executeAndroidAssignment({ assignment, target, config, sig
   let uploadsOk = true;
   for (const item of files) {
     try { item.result.evidence.push(await upload(item.file)); }
-    catch (error) { uploadsOk = false; item.result.status = 'FAILED'; item.result.error = `${item.result.error || ''} Evidence upload failed: ${errorMessage(error)}`.trim(); }
+    catch (error) { infrastructureErrors.add('EVIDENCE_UPLOAD_FAILED'); uploadsOk = false; item.result.status = 'FAILED'; item.result.error = `${item.result.error || ''} Evidence upload failed: ${errorMessage(error)}`.trim(); }
   }
   if (cleanupOk && uploadsOk && path.dirname(directory) === path.resolve(config.artifactsDir)) await rm(directory, { recursive: true, force: true }).catch(() => {});
-  return { type: 'done', taskId: assignment.taskId, status: results.length && results.every(item => item.status === 'PASSED') ? 'PASSED' : 'FAILED', results, logs, cleanupOk };
+  return { type: 'done', taskId: assignment.taskId, status: results.length && results.every(item => item.status === 'PASSED') ? 'PASSED' : 'FAILED', results, logs, cleanupOk, infrastructureErrors: [...infrastructureErrors] };
 }

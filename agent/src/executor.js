@@ -50,7 +50,7 @@ export async function executeAssignment({ assignment, target, config, signal, up
   signal?.addEventListener('abort', forwardAbort, { once: true });
   if (signal?.aborted) forwardAbort();
   const timer = setTimeout(() => controller.abort(new Error('Execution timeout exceeded')), Math.min(86400, Math.max(1, timeoutSeconds)) * 1000);
-  const logs = [], results = [], evidenceFiles = [];
+  const logs = [], results = [], evidenceFiles = [], infrastructureErrors = new Set();
   let browser, context, contextClose, browserClose, cleanupOk = true, directory;
   const log = line => { if (logs.length < 2000) logs.push(`${new Date().toISOString()} ${String(line).slice(0, 4000)}`); };
   const abortError = () => controller.signal.reason instanceof Error ? controller.signal.reason : new Error(String(controller.signal.reason || 'Execution cancelled'));
@@ -82,7 +82,9 @@ export async function executeAssignment({ assignment, target, config, signal, up
       const prefix = `case-${caseIndex + 1}`;
       let page, video, traceStarted = false;
       try {
-        assertActive(); validateCase(testCase);
+        assertActive();
+        try { validateCase(testCase); }
+        catch (error) { infrastructureErrors.add('CASE_VALIDATION_FAILED'); throw error; }
         progress(`Running ${testCase.name}`); log(`Case started: ${testCase.name}`);
         context = await browser.newContext({ recordVideo: { dir: directory }, viewport: { width: 1280, height: 720 }, acceptDownloads: false });
         assertActive();
@@ -134,6 +136,7 @@ export async function executeAssignment({ assignment, target, config, signal, up
       }
     }
   } catch (error) {
+    infrastructureErrors.add('EXECUTOR_FAILED');
     for (const testCase of assignment.cases || []) {
       if (!results.some(result => result.caseId === testCase.id)) results.push({ caseId: testCase.id, name: testCase.name, status: 'FAILED', durationMs: 0, error: controller.signal.aborted ? message(abortError()) : message(error), steps: [], evidence: [] });
     }
@@ -148,6 +151,7 @@ export async function executeAssignment({ assignment, target, config, signal, up
     controller.signal.removeEventListener('abort', interrupt);
   }
   let uploadsOk = true;
+  if (controller.signal.aborted) infrastructureErrors.add('EXECUTION_ABORTED');
   if (!cleanupOk && results.length) {
     const last = results.at(-1); last.status = 'FAILED'; last.error = `${last.error ? `${last.error}; ` : ''}Browser resource cleanup failed; target quarantined`;
   }
@@ -157,12 +161,12 @@ export async function executeAssignment({ assignment, target, config, signal, up
     if (results.length) evidenceFiles.push({ file: logFile, result: results[0] });
     for (const item of evidenceFiles) {
       try { item.result.evidence.push(await upload(item.file)); }
-      catch (error) { uploadsOk = false; item.result.status = 'FAILED'; item.result.error = `${item.result.error ? `${item.result.error}; ` : ''}Evidence upload failed: ${message(error)}`; log(`Evidence upload failed: ${path.basename(item.file)} ${message(error)}`); }
+      catch (error) { infrastructureErrors.add('EVIDENCE_UPLOAD_FAILED'); uploadsOk = false; item.result.status = 'FAILED'; item.result.error = `${item.result.error ? `${item.result.error}; ` : ''}Evidence upload failed: ${message(error)}`; log(`Evidence upload failed: ${path.basename(item.file)} ${message(error)}`); }
     }
     // Only remove the generated child directory after all evidence is safely stored and browser closure is verified.
     if (cleanupOk && uploadsOk && path.dirname(directory) === path.resolve(config.artifactsDir)) await rm(directory, { recursive: true, force: true }).catch(error => log(`Artifact cleanup failed: ${message(error)}`));
   }
-  return { type: 'done', taskId: assignment.taskId, status: results.length && results.every(result => result.status === 'PASSED') ? 'PASSED' : 'FAILED', results, logs, cleanupOk, durationMs: Date.now() - started };
+  return { type: 'done', taskId: assignment.taskId, status: results.length && results.every(result => result.status === 'PASSED') ? 'PASSED' : 'FAILED', results, logs, cleanupOk, infrastructureErrors: [...infrastructureErrors], durationMs: Date.now() - started };
 }
 
 async function performStep(page, step, config, signal, screenshot) {

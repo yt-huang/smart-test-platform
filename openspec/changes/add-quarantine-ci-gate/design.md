@@ -16,6 +16,8 @@ gate.status 为 PENDING/PASSED/WARN/BLOCKED，计数为非负整数。total 为�
 
 仅 Agent 明确提供的 FAILED 用例结果可因冻结集合而计入 quarantinedFailures。SKIPPED、TIMED_OUT、缺失结果均计入 blockingFailures。未收到完整有效完成、取消、排队/执行超时、断线、分配失败、清理失败均产生 infrastructureFailures>0 并 BLOCKED，即使所有可见失败用例已隔离。明确保存供应结果 ID 和 cleanupOk 等内部结构，不通过 message 文案猜测正常完成。
 
+浏览器 Agent 的 done 增加 `infrastructureErrors` 字符串数组，实际执行器启动/外层失败、审批输入校验失败、中断、证据上传失败分别上报 EXECUTOR_FAILED/CASE_VALIDATION_FAILED/EXECUTION_ABORTED/EVIDENCE_UPLOAD_FAILED。后端校验最多20项、每项不超过100字符，任何显式错误均阻塞。旧 Agent 缺该字段兼容，但完整显式结果与 cleanupOk 仍必需。顶层 done.status=FAILED 可来自正常断言失败，不能单凭它推断基础设施错误。主控负责 Agent 与真实验证脚本，其他文件负责人不变。
+
 有基础设施错误或 blockingFailures>0 为 BLOCKED；无阻塞且 quarantinedFailures>0 为 WARN；非空总数、全部真实 PASSED 为 PASSED。首次终态时冻结 gate 和 gate 导出使用的结果快照；晚到 done 可以补原始证据/清理，但不能把已取消/超时的门禁改成放行，也不能使 gate JSON 与 gate-junit 相互矛盾。公开文档不泄漏内部字段。
 
 ## Gate JUnit

@@ -82,5 +82,6 @@ test('concurrent assignments cannot share a leased browser', async () => {
   const client = clientWith(async () => { await new Promise(resolve => finish = resolve); return { type: 'done', taskId: 't1', status: 'PASSED', cleanupOk: true, results: [], logs: [] }; });
   client.handle(assignment); await tick(); client.handle({ ...assignment, taskId: 't2', run: { ...assignment.run, id: 'r2' } });
   assert.equal(client.socket.messages.at(-1).status, 'FAILED'); assert.equal(client.socket.messages.at(-1).cleanupOk, false);
+  assert.deepEqual(client.socket.messages.at(-1).infrastructureErrors, ['EXECUTOR_FAILED']);
   finish(); await tick(); await client.stop();
 });

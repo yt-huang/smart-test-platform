@@ -41,6 +41,7 @@ jobs:
           npm ci --prefix cli
           npm test --prefix cli
           npx --prefix agent playwright install --with-deps chromium firefox
+          npm run test:browser --prefix agent
       - name: Test and package central platform
         run: |
           mkdir -p backend/src/main/resources/static
@@ -53,6 +54,8 @@ jobs:
           node scripts/verify-e2e.mjs
       - name: Verify real browser regression matrices
         run: node scripts/verify-matrix.mjs
+      - name: Verify quarantine-aware gate with actual failing browser assertions
+        run: node scripts/verify-gate.mjs
       - name: Check live reports and evidence integrity
         run: |
           node scripts/verify-persistence.mjs baseline --snapshot /tmp/platform-persistence.json

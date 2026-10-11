@@ -92,7 +92,7 @@ export class AgentClient {
     const leased = [...this.active.values()].some(task => task.target?.id === target?.id);
     this.send({ type: 'ack', taskId: assignment.taskId }, socket);
     if (!target || leased || target.status !== 'IDLE') {
-      const done = { type: 'done', taskId: assignment.taskId, status: 'FAILED', cleanupOk: !leased && target?.cleanupOk === true,
+      const done = { type: 'done', taskId: assignment.taskId, status: 'FAILED', infrastructureErrors: ['EXECUTOR_FAILED'], cleanupOk: !leased && target?.cleanupOk === true,
         results: assignment.cases.map(testCase => ({ caseId: testCase.id, name: testCase.name, status: 'FAILED', durationMs: 0, error: 'Assigned resource is unavailable, busy, or quarantined', steps: [], evidence: [] })), logs: [] };
       this.send(done, socket); this.remember(done); return;
     }
@@ -102,7 +102,7 @@ export class AgentClient {
     task.promise = Promise.resolve().then(() => this.execute({ assignment, target, config: this.config, signal: task.controller.signal,
       upload: file => uploadEvidence(this.config, this.key, assignment.taskId, file),
       progress: message => this.send({ type: 'progress', taskId: assignment.taskId, message }, socket)
-    })).catch(error => ({ type: 'done', taskId: assignment.taskId, status: 'FAILED', cleanupOk: false,
+    })).catch(error => ({ type: 'done', taskId: assignment.taskId, status: 'FAILED', infrastructureErrors: ['EXECUTOR_FAILED'], cleanupOk: false,
       results: assignment.cases.map(testCase => ({ caseId: testCase.id, name: testCase.name, status: 'FAILED', durationMs: 0, error: error.message, steps: [], evidence: [] })), logs: [error.message]
     })).then(done => {
       target.status = done.cleanupOk ? 'IDLE' : 'MAINTENANCE'; target.cleanupOk = done.cleanupOk === true;

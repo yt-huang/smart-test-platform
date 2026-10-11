@@ -56,6 +56,7 @@ test('real Chromium: outbound WS contract, DOM actions, fresh contexts, failure 
   const timeout = setTimeout(() => rejectDone(new Error('Timed out waiting for real browser execution')), 45000);
   const result = await done.finally(() => clearTimeout(timeout));
   assert.equal(result.status, 'FAILED'); assert.equal(result.cleanupOk, true);
+  assert.deepEqual(result.infrastructureErrors, [], 'An actual assertion failure is not an executor fault');
   assert.deepEqual(result.results.map(item => item.status), ['PASSED', 'PASSED', 'FAILED']);
   assert.match(result.results[2].error, /Wrong text/);
   assert.equal(messages.filter(item => item.type === 'ack').length, 2);
@@ -83,7 +84,26 @@ test('real execution timeout and platform cancellation close browser resources',
       upload: async file => ({ id: path.basename(file), url: '/evidence', name: path.basename(file), size: (await readFile(file)).length }), progress: () => {} });
     clearTimeout(timer);
     assert.equal(result.status, 'FAILED'); assert.equal(result.cleanupOk, true);
+    assert.ok(result.infrastructureErrors.includes('EXECUTION_ABORTED'));
     assert.match(result.results[0].error, mode === 'timeout' ? /timeout/i : /cancelled/i);
     assert.ok(Date.now() - started < 8000);
   }
+});
+
+test('real browser upload failures are explicit infrastructure faults; validation and unavailable executor also fail closed', { timeout: 30000 }, async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-gate-infra-'));
+  const server = createTargetServer(); const targetUrl = await listen(server);
+  t.after(async () => { await close(server); await rm(directory, { recursive: true, force: true }); });
+  const config = readConfig({ AGENT_ID: 'gate-infra', AGENT_WORK_DIR: directory, AGENT_ALLOW_PRIVATE_NETWORK: 'true', AGENT_STEP_TIMEOUT_MS: '1000' });
+  const [target] = await discoverTargets(config, () => {});
+  const assignment = { taskId: 'upload-failed', run: { executionTimeoutSeconds: 10 }, cases: [fixture('upload-failed', targetUrl, [{ action: 'expectVisible', target: '#login-form' }])] };
+  const result = await executeAssignment({ assignment, target, config, upload: async () => { throw new Error('acceptance upload endpoint unavailable'); } });
+  assert.equal(result.status, 'FAILED'); assert.equal(result.cleanupOk, true);
+  assert.deepEqual(result.infrastructureErrors, ['EVIDENCE_UPLOAD_FAILED']);
+  assert.ok(result.results[0].steps.every(step => step.status === 'PASSED'));
+  assert.match(result.results[0].error, /Evidence upload failed/);
+  const invalid = await executeAssignment({ assignment: { ...assignment, taskId: 'invalid-case', cases: [{ ...assignment.cases[0], status: 'DRAFT' }] }, target, config, upload: async () => ({ id: 'fixture' }) });
+  assert.ok(invalid.infrastructureErrors.includes('CASE_VALIDATION_FAILED'));
+  const unavailable = await executeAssignment({ assignment: { ...assignment, taskId: 'unavailable' }, target: null, config, upload: async () => ({ id: 'fixture' }) });
+  assert.ok(unavailable.infrastructureErrors.includes('EXECUTOR_FAILED'));
 });
