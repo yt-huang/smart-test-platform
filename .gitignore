@@ -27,6 +27,8 @@ node_modules/
 dist/
 target/
 .data/
+.state/
+artifacts/
 data/
 evidence/
 playwright-report/
