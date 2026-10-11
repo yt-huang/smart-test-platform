@@ -128,6 +128,36 @@ class PlatformIntegrationTest {
         var timed=store.get("run",str(low,"id")); timed.put("createdAt",Instant.now().minusSeconds(1000).toString()); store.save("run",timed); service.tick();
         timed=service.get("run",str(low,"id")); assertEquals("TIMED_OUT",timed.get("status")); assertTrue(objects(timed.get("results")).isEmpty());
     }
+    @Test void actualBrowserAndAndroidVersionsSupportNumericComponentRanges() {
+        var browser=target("chromium-real","local",List.of()); browser.put("version","156.0.8078.4");
+        enroll("a","s",List.of(browser)); var c=approved(false);
+        var run=service.createRun(map("caseIds",List.of(c.get("id")),"capabilities",map("platform","web","browser","chromium","version",">=1")),"admin");
+        assertEquals("ASSIGNED",run.get("status")); assertEquals("chromium-real",run.get("deviceId")); complete("s",run,c,true);
+        var tooNew=service.createRun(map("caseIds",List.of(c.get("id")),"capabilities",map("platform","web","browser","chromium","version",">=156.0.8079")),"admin");
+        assertEquals("QUEUED",tooNew.get("status"));
+        assertTrue(versionMatches("156.0.8078.4",">156.0.8078.3")); assertTrue(versionMatches("156.0.8078.4","<=156.0.8078.4"));
+        assertFalse(versionMatches("156.0.8078.4","<156.0.8078.4")); assertFalse(versionMatches("156.0.8078.4",">156.0.8078.4"));
+        assertTrue(versionMatches("156.10"," > 156.9")); assertTrue(versionMatches("13",">=13")); assertTrue(versionMatches("13.0.0","==13"));
+        assertTrue(versionMatches("14","<15")); assertFalse(versionMatches("12",">=13"));
+        assertFalse(versionMatches("13.beta",">=13")); assertFalse(versionMatches("13",">=13garbage"));
+        var android=map("platform","android","provider","local","version","13","tags",List.of());
+        assertTrue(matches(map("capabilities",map("platform","android","version",">=13","tags",List.of())),android));
+        assertFalse(matches(map("capabilities",map("platform","android","version",">13","tags",List.of())),android));
+    }
+    @Test void equalPriorityQueueAndHistoryUseInstantChronologyAcrossFractionPrecision() {
+        var c=approved(false); var later=submit(c); var earlier=submit(c);
+        Instant base=Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).minusSeconds(1);
+        String early=base.plusNanos(12_000_000).toString(),late=base.plusNanos(12_345_000).toString();
+        assertTrue(early.endsWith(".012Z")); assertTrue(late.endsWith(".012345Z"));
+        var first=store.get("run",str(earlier,"id")); first.put("createdAt",early); store.save("run",first);
+        var second=store.get("run",str(later,"id")); second.put("createdAt",late); store.save("run",second);
+        enroll("a","s",List.of(target("d","local",List.of()))); service.tick();
+        assertEquals("ASSIGNED",service.get("run",str(earlier,"id")).get("status")); assertEquals("QUEUED",service.get("run",str(later,"id")).get("status"));
+        assertEquals(later.get("id"),service.list("run").getFirst().get("id"),"Lists must return the genuinely later timestamp first");
+        for(var h:store.list("history")) if(c.get("id").equals(h.get("caseId"))) {h.put("createdAt","CREATE".equals(h.get("action"))?early:late);store.save("history",h);}
+        assertEquals("CREATE",service.caseHistory(str(c,"id")).getFirst().get("action"));
+        assertEquals("APPROVE",service.caseHistory(str(c,"id")).getLast().get("action"));
+    }
     @Test void assignmentOwnershipIdempotencyAndValidatedVerdict() {
         enroll("owner","so",List.of(target("d1","local",List.of()))); enroll("other","sx",List.of(target("d2","local",List.of())));
         var c=approved(false); var run=submit(c);

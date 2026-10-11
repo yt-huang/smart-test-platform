@@ -14,11 +14,14 @@ import java.security.*;
 import java.time.*;
 import java.util.*;
 import java.util.function.BiConsumer;
+import java.math.BigInteger;
+import java.util.regex.Pattern;
 
 /** Single-workspace modular monolith. State changes and resource leases share one transaction/lock. */
 @Service
 @Transactional
 public class PlatformService {
+    private static final Pattern VERSION_REQUIREMENT=Pattern.compile("^(>=|<=|==|=|>|<)?\\s*(\\d+(?:\\.\\d+)*)$");
     private final DocumentStore store;
     private final BCryptPasswordEncoder passwords=new BCryptPasswordEncoder(12);
     private final SecureRandom random=new SecureRandom();
@@ -75,7 +78,7 @@ public class PlatformService {
         var record=base("audit"); record.putAll(map("actor",actor,"action",action,"target",target,"detail",detail)); store.save("audit",record);
     }
     public synchronized List<Map<String,Object>> list(String kind) {
-        var values=store.list(kind); values.sort(Comparator.comparing((Map<String,Object> m)->str(m,"createdAt")).reversed());
+        var values=store.list(kind); values.sort(Comparator.comparing((Map<String,Object> m)->Instant.parse(str(m,"createdAt"))).reversed());
         return values.stream().map(v->publicDocument(kind,v)).toList();
     }
     public synchronized Map<String,Object> get(String kind,String id) { return publicDocument(kind,store.get(kind,id)); }
@@ -96,7 +99,7 @@ public class PlatformService {
         store.save("case",value); history(value,actor,"APPROVE"); audit(actor,"APPROVE_CASE",id,str(value,"name")); return value;
     }
     public synchronized List<Map<String,Object>> caseHistory(String id) {
-        store.get("case",id); return store.list("history").stream().filter(h->id.equals(h.get("caseId"))).sorted(Comparator.comparing(h->str(h,"createdAt"))).toList();
+        store.get("case",id); return store.list("history").stream().filter(h->id.equals(h.get("caseId"))).sorted(Comparator.comparing(h->Instant.parse(str(h,"createdAt")))).toList();
     }
     public synchronized void deleteCase(String id,String actor) {
         store.get("case",id);
@@ -355,7 +358,7 @@ public class PlatformService {
         }
         // A cancellation with no cleanup response is never returned to IDLE by elapsed time.
         for(var d:store.list("device")) if("CLEANING".equals(d.get("status"))&&Instant.parse(str(d,"cleaningAt")).plusSeconds(leaseSeconds).isBefore(current)) { d.put("status","MAINTENANCE"); d.put("quarantined",true); store.save("device",d); }
-        var queue=store.list("run").stream().filter(r->"QUEUED".equals(r.get("status"))).sorted(Comparator.<Map<String,Object>>comparingInt(r->number(r,"priority",0)).reversed().thenComparing(r->str(r,"createdAt"))).toList();
+        var queue=store.list("run").stream().filter(r->"QUEUED".equals(r.get("status"))).sorted(Comparator.<Map<String,Object>>comparingInt(r->number(r,"priority",0)).reversed().thenComparing(r->Instant.parse(str(r,"createdAt")))).toList();
         for(var run:queue) {
             var matching=store.list("device").stream().filter(d->"IDLE".equals(d.get("status"))&&connections.containsKey(str(d,"agentId"))&&matches(run,d)).sorted(Comparator.comparing(d->str(d,"id"))).findFirst();
             if(matching.isEmpty()) continue;
@@ -371,9 +374,23 @@ public class PlatformService {
         for(String key:List.of("platform","provider","browser","brand","model")) if(caps.containsKey(key)&&!str(caps,key).isBlank()&&!str(caps,key).equalsIgnoreCase(str(device,key))) return false;
         if(!strings(device.get("tags")).containsAll(strings(caps.get("tags")))) return false;
         if(bool(run,"sensitive",false)&&(!"local".equals(device.get("provider"))||!strings(device.get("tags")).contains("trusted"))) return false;
-        String version=str(caps,"version");
-        if(version.startsWith(">=")) { try { return Double.parseDouble(str(device,"version").replaceAll("[^0-9.].*",""))>=Double.parseDouble(version.substring(2)); } catch(Exception e) { return false; } }
-        return version.isBlank()||version.equals(str(device,"version"));
+        return versionMatches(str(device,"version"),str(caps,"version"));
+    }
+    /** Numeric OS/browser segments, with zero padding: 13 == 13.0 and 156.10 > 156.9. */
+    static boolean versionMatches(String actual,String requirement) {
+        if(requirement.isBlank())return true;
+        var expected=VERSION_REQUIREMENT.matcher(requirement.strip());
+        if(!expected.matches()||!actual.matches("\\d+(?:\\.\\d+)*"))return false;
+        String[] actualParts=actual.split("\\."),expectedParts=expected.group(2).split("\\."); int comparison=0;
+        for(int i=0;i<Math.max(actualParts.length,expectedParts.length);i++) {
+            BigInteger left=i<actualParts.length?new BigInteger(actualParts[i]):BigInteger.ZERO;
+            BigInteger right=i<expectedParts.length?new BigInteger(expectedParts[i]):BigInteger.ZERO;
+            comparison=left.compareTo(right); if(comparison!=0)break;
+        }
+        return switch(Objects.toString(expected.group(1),"=")) {
+            case ">=" -> comparison>=0; case "<=" -> comparison<=0; case ">" -> comparison>0; case "<" -> comparison<0;
+            case "=","==" -> comparison==0; default -> false;
+        };
     }
     private void quarantine(Map<String,Object> run,String status) { var d=store.get("device",str(run,"deviceId")); d.put("status",status); d.put("quarantined",true); d.put("cleaningAt",now()); store.save("device",d); }
     private void finish(Map<String,Object> run,String status,String message) { run.put("status",status); run.put("finishedAt",now()); run.put("message",message); store.save("run",run); }
