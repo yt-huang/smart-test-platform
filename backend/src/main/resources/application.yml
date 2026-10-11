@@ -1,0 +1,28 @@
+server:
+  port: ${PORT:8080}
+  forward-headers-strategy: ${PLATFORM_FORWARD_HEADERS:none}
+  error:
+    include-message: never
+spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:h2:file:./.data/platform;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE}
+    username: ${DATABASE_USER:sa}
+    password: ${DATABASE_PASSWORD:}
+  sql:
+    init:
+      mode: always
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 101MB
+  jackson:
+    deserialization:
+      fail-on-trailing-tokens: true
+platform:
+  admin-password: ${PLATFORM_ADMIN_PASSWORD:}
+  evidence-path: ${PLATFORM_EVIDENCE_DIR:${PLATFORM_EVIDENCE_PATH:./.data/evidence}}
+  trust-proxy: ${PLATFORM_TRUST_PROXY:false}
+  allow-internal-http: ${PLATFORM_ALLOW_INTERNAL_HTTP:false}
+  session-hours: ${PLATFORM_SESSION_HOURS:12}
+  lease-seconds: ${PLATFORM_LEASE_SECONDS:30}
+  scheduler-enabled: ${PLATFORM_SCHEDULER_ENABLED:true}
