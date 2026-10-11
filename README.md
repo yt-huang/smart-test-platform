@@ -1,0 +1,88 @@
+# 智测平台 · Smart Test Platform
+
+基于本仓库 PRD、架构与 OpenSpec 开发的中心平台，采用 Spring Boot 3 / Java 21、PostgreSQL、React 和主动出站的 Playwright Agent。浏览器可完成用例编写、人工审核、计划编排、实际执行、证据查看与报告导出。
+
+## GitHub Codespaces
+
+1. 在仓库 **Code → Codespaces → Create codespace on main** 创建工作区；仓库内 `.devcontainer/devcontainer.json` 自动安装运行环境并构建应用。
+2. 首次容器构建需要下载依赖和浏览器。完成后在 **Ports** 打开 **8080**，登录平台。
+3. 管理员用户名为 `admin`；在 Codespaces 终端运行 `node scripts/admin-password.mjs` 查看本工作区随机生成的密码。
+4. 外部访问地址由 GitHub 分配，形如 `https://<codespace-name>-8080.app.github.dev`。默认端口私有，仅工作区所有者通过 GitHub 登录后可访问；需要团队分享时在 Ports 中选择相应可见性。
+
+Codespaces 停止后应用也停止；这是开发与验收部署。代码和数据保留在工作区及 Docker 命名卷中。长期运行应部署到常驻服务器；不要删除含唯一数据的 Codespace。
+
+## Docker 部署
+
+需要 Docker Engine、Compose 和 Node.js 22+（只用于生成配置）。
+
+```bash
+node scripts/init-env.mjs
+docker compose up -d --build --wait
+node scripts/admin-password.mjs
+```
+
+打开 `http://localhost:8080`。Compose 包含中心平台、PostgreSQL、浏览器 Agent；数据库不映射公网端口。应用和证据数据使用独立命名卷。公网部署需要可信 HTTPS 反向代理，Agent 使用对应 WSS 地址。管理员与数据库密码在忽略提交的 `.env` 中分别随机生成。
+
+## 本地开发
+
+Java 21、Maven 3.9+、Node 22+：
+
+```bash
+node scripts/init-env.mjs
+# 将 .env 中的 PLATFORM_ADMIN_PASSWORD 设置到当前终端环境
+mvn -f backend/pom.xml spring-boot:run
+```
+
+另一终端启动门户：
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+前端开发代理转发 API 和 WebSocket 到 `localhost:8080`。开发默认使用本地 H2 文件数据库；Compose 使用 PostgreSQL。没有配置管理员密码时，后端拒绝启动。
+
+在平台 Agent 管理中创建一次性 AgentKey，然后启动办公机 Agent：
+
+```bash
+cd agent
+npm ci
+npm run install:browser
+# 设置 PLATFORM_URL、AGENT_KEY 与稳定的 AGENT_ID
+npm start
+```
+
+Agent 不监听入站端口，主动注册和续租；任务只按平台、浏览器、provider 和标签匹配。浏览器执行使用独立上下文，收集真实截图、trace、视频与错误；清理失败资源进入维护状态。
+
+CLI 和 CI 用法见 [cli/README.md](cli/README.md)，执行协议与权限见 [docs/implementation-handoff.md](docs/implementation-handoff.md)，真实交付与验收状态见 [docs/delivery.md](docs/delivery.md)。
+
+## 验收
+
+```bash
+npm ci --prefix frontend
+npm run build --prefix frontend
+npm ci --prefix agent
+npm test --prefix agent
+npm ci --prefix cli
+npm test --prefix cli
+mvn -f backend/pom.xml verify
+# 后端及真实浏览器 Agent 启动后
+node scripts/verify-e2e.mjs
+```
+
+验收包含真实浏览器成功/失败执行、草稿审核门禁、证据鉴权、报告导出、超时、取消、RBAC 和资源清理。GitHub Actions 自动执行相同闭环。
+
+## 备份与恢复
+
+```bash
+bash scripts/backup.sh
+# 建议在全新部署上恢复，使用对应的 .env
+bash scripts/restore.sh backups/<timestamp>
+```
+
+备份覆盖 PostgreSQL、证据与 Agent 状态，密码配置单独安全保存。恢复会写入当前部署数据库，先停止任务并备份当前数据。
+
+## 外部接入依赖
+
+Android/iOS 真机、Mac/WDA、scrcpy 远程投屏、私有视觉模型、商业云真机与飞书通知需要实际设备、服务或凭据；浏览器执行闭环不依赖这些资源。界面和报告不得把未连接的设备、模型或执行结果显示成已验收能力。原 `build-test-platform-agent-arch` 的 M2/M3 任务保留各自真实状态。

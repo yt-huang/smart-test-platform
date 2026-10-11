@@ -22,7 +22,8 @@ services:
       SPRING_DATASOURCE_USERNAME: platform
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Missing database password}
       PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:?Missing admin password}
-      PLATFORM_EVIDENCE_DIR: /app/evidence
+      PLATFORM_EVIDENCE_PATH: /app/evidence
+      PLATFORM_FORWARD_HEADERS: framework
       PLATFORM_TRUST_PROXY: "true"
     ports:
       - "8080:8080"
@@ -48,6 +49,7 @@ services:
       AGENT_NAME: Codespaces Chromium
       AGENT_KEY_FILE: /agent-data/agent-key.json
       AGENT_WORK_DIR: /agent-data/work
+      AGENT_ARTIFACTS_DIR: /agent-data/artifacts
       AGENT_ALLOW_PRIVATE_NETWORK: "true"
     volumes:
       - agent-data:/agent-data
