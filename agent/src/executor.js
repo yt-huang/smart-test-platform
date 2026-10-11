@@ -43,6 +43,7 @@ export async function checkUrlAllowed(url, allowPrivateNetwork) {
 }
 
 export async function executeAssignment({ assignment, target, config, signal, upload, progress = () => {} }) {
+  const logStartedAt = new Date().toISOString();
   const started = Date.now();
   const timeoutSeconds = assignment.run.executionTimeoutSeconds ?? config.executionTimeoutSeconds;
   const controller = new AbortController();
@@ -51,13 +52,14 @@ export async function executeAssignment({ assignment, target, config, signal, up
   if (signal?.aborted) forwardAbort();
   const timer = setTimeout(() => controller.abort(new Error('Execution timeout exceeded')), Math.min(86400, Math.max(1, timeoutSeconds)) * 1000);
   const logs = [], results = [], evidenceFiles = [], infrastructureErrors = new Set();
-  let browser, context, contextClose, browserClose, cleanupOk = true, directory;
+  let browser, context, contextClose, contextClosedAt, browserClose, cleanupOk = true, directory;
   const log = line => { if (logs.length < 2000) logs.push(`${new Date().toISOString()} ${String(line).slice(0, 4000)}`); };
   const abortError = () => controller.signal.reason instanceof Error ? controller.signal.reason : new Error(String(controller.signal.reason || 'Execution cancelled'));
   const assertActive = () => { if (controller.signal.aborted) throw abortError(); };
   const closeContext = () => {
     if (!context) return Promise.resolve();
-    return contextClose ||= context.close({ reason: controller.signal.aborted ? message(abortError()) : 'Case completed' });
+    return contextClose ||= context.close({ reason: controller.signal.aborted ? message(abortError()) : 'Case completed' })
+      .then(() => { contextClosedAt = new Date().toISOString(); });
   };
   const closeBrowser = () => {
     if (!browser) return Promise.resolve();
@@ -75,12 +77,20 @@ export async function executeAssignment({ assignment, target, config, signal, up
     browser = await browserTypes[target.browser].launch({ headless: config.headless, timeout: config.stepTimeoutMs });
     assertActive();
     for (const [caseIndex, testCase] of assignment.cases.entries()) {
+      const caseStartedAt = new Date().toISOString();
       const caseStarted = Date.now();
-      const result = { caseId: testCase.id, name: testCase.name, status: 'PASSED', durationMs: 0, error: null, steps: [], evidence: [] };
+      const result = { caseId: testCase.id, name: testCase.name, status: 'PASSED', durationMs: 0, error: null, steps: [], evidence: [], timing: { startedAt: caseStartedAt } };
       results.push(result);
-      context = undefined; contextClose = undefined;
+      context = undefined; contextClose = undefined; contextClosedAt = undefined;
       const prefix = `case-${caseIndex + 1}`;
-      let page, video, traceStarted = false;
+      let page, video, videoStartedAt, traceStartedAt, traceStarted = false;
+      const screenshot = async (file, selector, options = {}) => {
+        const startedAt = new Date().toISOString();
+        if (selector) await page.locator(selector).screenshot({ path: file, ...options });
+        else await page.screenshot({ path: file, fullPage: true, ...options });
+        const finishedAt = new Date().toISOString();
+        evidenceFiles.push({ file, result, capture: { kind: 'screenshot', caseId: testCase.id, startedAt, finishedAt } });
+      };
       try {
         assertActive();
         try { validateCase(testCase); }
@@ -95,7 +105,10 @@ export async function executeAssignment({ assignment, target, config, signal, up
             try { await checkUrlAllowed(route.request().url(), config.allowPrivateNetwork); await route.continue(); }
             catch (error) { log(`Request blocked: ${message(error)}`); await route.abort('blockedbyclient').catch(() => {}); }
           });
+          traceStartedAt = new Date().toISOString();
           await context.tracing.start({ screenshots: true, snapshots: true, sources: true }); traceStarted = true;
+          // This marks the new-page recording operation, not the media's exact first frame.
+          videoStartedAt = new Date().toISOString();
           page = await context.newPage(); video = page.video();
         } catch (error) { infrastructureErrors.add('EXECUTOR_FAILED'); throw error; }
         page.on('crash', () => infrastructureErrors.add('EXECUTOR_FAILED'));
@@ -104,38 +117,38 @@ export async function executeAssignment({ assignment, target, config, signal, up
         page.on('requestfailed', request => log(`requestfailed: ${request.url()} ${request.failure()?.errorText}`));
         for (const [index, step] of testCase.steps.entries()) {
           assertActive();
+          const stepStartedAt = new Date().toISOString();
           const stepStarted = Date.now();
-          const outcome = { index, action: step.action, target: step.target || '', status: 'PASSED', durationMs: 0 };
+          const outcome = { index, action: step.action, target: step.target || '', status: 'PASSED', durationMs: 0, timing: { startedAt: stepStartedAt } };
           result.steps.push(outcome);
           try {
             await performStep(page, step, config, controller.signal, async () => {
               const file = path.join(directory, `${prefix}-step-${index + 1}.png`);
-              if (step.target) await page.locator(step.target).screenshot({ path: file });
-              else await page.screenshot({ path: file, fullPage: true });
-              evidenceFiles.push({ file, result });
+              await screenshot(file, step.target);
             });
             log(`${testCase.name} step ${index + 1} ${step.action}: passed`);
           } catch (error) { outcome.status = 'FAILED'; outcome.error = message(error); throw error; }
-          finally { outcome.durationMs = Date.now() - stepStarted; }
+          finally { outcome.timing.finishedAt = new Date().toISOString(); outcome.durationMs = Date.now() - stepStarted; }
         }
         const file = path.join(directory, `${prefix}-complete.png`);
-        await page.screenshot({ path: file, fullPage: true }); evidenceFiles.push({ file, result });
+        await screenshot(file);
       } catch (error) {
         if (browser && !browser.isConnected()) infrastructureErrors.add('EXECUTOR_FAILED');
         result.status = 'FAILED'; result.error = controller.signal.aborted ? message(abortError()) : message(error);
         log(`${testCase.name}: ${result.error}`);
         if (page && !page.isClosed()) {
           const file = path.join(directory, `${prefix}-failure.png`);
-          await page.screenshot({ path: file, fullPage: true, timeout: 3000 }).then(() => evidenceFiles.push({ file, result })).catch(() => {});
+          await screenshot(file, undefined, { timeout: 3000 }).catch(() => {});
         }
       } finally {
         if (traceStarted) {
           const file = path.join(directory, `${prefix}-trace.zip`);
-          await context.tracing.stop({ path: file }).then(() => evidenceFiles.push({ file, result })).catch(error => { infrastructureErrors.add('EXECUTOR_FAILED'); log(`Trace could not finalize: ${message(error)}`); });
+          await context.tracing.stop({ path: file }).then(() => evidenceFiles.push({ file, result, capture: { kind: 'trace', caseId: testCase.id, startedAt: traceStartedAt, finishedAt: new Date().toISOString() } })).catch(error => { infrastructureErrors.add('EXECUTOR_FAILED'); log(`Trace could not finalize: ${message(error)}`); });
         }
         await closeContext().catch(error => { cleanupOk = false; log(`Context cleanup failed: ${message(error)}`); });
         if (context?.pages().length) { cleanupOk = false; log('Context still has open pages after close'); }
-        if (video) await video.path().then(file => evidenceFiles.push({ file, result })).catch(error => { infrastructureErrors.add('EXECUTOR_FAILED'); log(`Video could not finalize: ${message(error)}`); });
+        if (video && contextClosedAt) await video.path().then(file => evidenceFiles.push({ file, result, capture: { kind: 'video', caseId: testCase.id, startedAt: videoStartedAt, finishedAt: contextClosedAt } })).catch(error => { infrastructureErrors.add('EXECUTOR_FAILED'); log(`Video could not finalize: ${message(error)}`); });
+        result.timing.finishedAt = new Date().toISOString();
         result.durationMs = Date.now() - caseStarted;
       }
     }
@@ -162,9 +175,10 @@ export async function executeAssignment({ assignment, target, config, signal, up
   if (directory) {
     const logFile = path.join(directory, 'execution.log');
     await writeFile(logFile, logs.join('\n'), 'utf8');
-    if (results.length) evidenceFiles.push({ file: logFile, result: results[0] });
+    const logFinishedAt = new Date().toISOString();
+    if (results.length) evidenceFiles.push({ file: logFile, result: results[0], capture: { kind: 'log', startedAt: logStartedAt, finishedAt: logFinishedAt } });
     for (const item of evidenceFiles) {
-      try { item.result.evidence.push(await upload(item.file)); }
+      try { item.result.evidence.push(await upload(item.file, item.capture)); }
       catch (error) { infrastructureErrors.add('EVIDENCE_UPLOAD_FAILED'); uploadsOk = false; item.result.status = 'FAILED'; item.result.error = `${item.result.error ? `${item.result.error}; ` : ''}Evidence upload failed: ${message(error)}`; log(`Evidence upload failed: ${path.basename(item.file)} ${message(error)}`); }
     }
     // Only remove the generated child directory after all evidence is safely stored and browser closure is verified.

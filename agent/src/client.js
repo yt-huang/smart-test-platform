@@ -100,7 +100,7 @@ export class AgentClient {
     const task = { target, controller: new AbortController(), promise: null };
     this.active.set(assignment.taskId, task);
     task.promise = Promise.resolve().then(() => this.execute({ assignment, target, config: this.config, signal: task.controller.signal,
-      upload: file => uploadEvidence(this.config, this.key, assignment.taskId, file),
+      upload: (file, capture) => uploadEvidence(this.config, this.key, assignment.taskId, file, capture),
       progress: message => this.send({ type: 'progress', taskId: assignment.taskId, message }, socket)
     })).catch(error => ({ type: 'done', taskId: assignment.taskId, status: 'FAILED', infrastructureErrors: ['EXECUTOR_FAILED'], cleanupOk: false,
       results: assignment.cases.map(testCase => ({ caseId: testCase.id, name: testCase.name, status: 'FAILED', durationMs: 0, error: error.message, steps: [], evidence: [] })), logs: [error.message]

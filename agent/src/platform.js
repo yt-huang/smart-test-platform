@@ -44,12 +44,13 @@ export async function resolveAgentKey(config) {
   return created.key;
 }
 
-export async function uploadEvidence(config, key, taskId, filePath) {
+export async function uploadEvidence(config, key, taskId, filePath, capture) {
   const name = path.basename(filePath);
   const contentType = name.endsWith('.png') ? 'image/png' : name.endsWith('.webm') ? 'video/webm' : name.endsWith('.zip') ? 'application/zip' : 'text/plain';
   const body = new FormData();
   body.set('taskId', taskId);
   body.set('file', new Blob([await readFile(filePath)], { type: contentType }), name);
+  if (capture !== undefined) body.set('capture', JSON.stringify(capture));
   const result = await api(config, '/agent/evidence', { method: 'POST', key, body, signal: AbortSignal.timeout(60000) });
   if (!result?.id || !result?.url) throw new Error('Invalid evidence upload response');
   return result;

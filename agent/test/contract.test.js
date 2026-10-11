@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
@@ -40,6 +40,121 @@ test('executor initialization fixture cannot turn a resource fault into an ordin
   assert.equal(result.status, 'FAILED'); assert.equal(result.cleanupOk, true);
   assert.deepEqual(result.infrastructureErrors, ['EXECUTOR_FAILED']);
   assert.match(result.results[0].error, /context initialization/);
+});
+
+// These lifecycle fixtures check the protocol's timestamp source around operations.
+// Their bytes are software fixtures, not evidence of a real browser or recorded media.
+function lifecycleFixture(t, { screenshotFails = false, traceFails = false } = {}) {
+  const operations = [];
+  let connected = true, closed = false, videoFile;
+  const operation = async (name, action) => {
+    const interval = { name, startedAt: new Date().toISOString() }; operations.push(interval);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    try { return await action?.(); }
+    finally { interval.finishedAt = new Date().toISOString(); }
+  };
+  const screenshot = options => operation(path.basename(options.path), async () => {
+    if (screenshotFails) throw new Error('fixture screenshot unavailable');
+    await writeFile(options.path, 'software screenshot fixture');
+  });
+  const page = Object.assign(new EventEmitter(), {
+    isClosed: () => closed, screenshot, locator: () => ({ screenshot }),
+    video: () => ({ path: async () => videoFile }),
+  });
+  t.mock.method(browserTypes.chromium, 'launch', async () => ({
+    newContext: async ({ recordVideo }) => {
+      videoFile = path.join(recordVideo.dir, 'fixture-video.webm');
+      return {
+        setDefaultTimeout() {}, setDefaultNavigationTimeout() {}, route: async () => {},
+        tracing: {
+          start: () => operation('trace-start'),
+          stop: ({ path: file }) => operation('trace-stop', async () => {
+            if (traceFails) throw new Error('fixture trace finalization unavailable');
+            await writeFile(file, 'software trace fixture');
+          }),
+        },
+        newPage: () => operation('new-page', () => page),
+        close: () => operation('context-close', async () => { closed = true; await writeFile(videoFile, 'software video fixture'); }),
+        pages: () => closed ? [] : [page],
+      };
+    },
+    close: async () => { connected = false; }, isConnected: () => connected,
+  }));
+  return { operations, isClosed: () => closed && !connected };
+}
+
+test('source timestamps bracket actual lifecycle operations even when durations are zero', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-timing-fixture-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const lifecycle = lifecycleFixture(t), uploads = [];
+  t.mock.method(Date, 'now', () => 123456789);
+  const before = new Date().toISOString();
+  const result = await executeAssignment({ assignment: { taskId: 'timing-fixture', run: { executionTimeoutSeconds: 10 }, cases: [{ ...approved, steps: [{ action: 'screenshot', target: '#fixture' }] }] },
+    target: { platform: 'web', browser: 'chromium' }, config: readConfig({ AGENT_WORK_DIR: directory }),
+    upload: async (file, capture) => {
+      assert.equal(lifecycle.isClosed(), true, 'uploads happen after browser cleanup');
+      const bytes = await readFile(file); assert.ok(bytes.length > 0);
+      uploads.push({ name: path.basename(file), capture, bytes });
+      return { id: path.basename(file), capture };
+    } });
+  const after = new Date().toISOString(), testcase = result.results[0];
+  assert.equal(result.status, 'PASSED'); assert.equal(result.durationMs, 0); assert.equal(testcase.durationMs, 0);
+  assert.ok(testcase.timing.startedAt >= before && testcase.timing.finishedAt <= after);
+  const step = testcase.steps[0]; assert.equal(step.durationMs, 0);
+  assert.ok(step.timing.startedAt < step.timing.finishedAt, 'wall-clock operation interval is independent of durationMs');
+  assert.ok(step.timing.startedAt >= testcase.timing.startedAt && step.timing.finishedAt <= testcase.timing.finishedAt);
+  const observed = name => lifecycle.operations.find(item => item.name === name);
+  const brackets = (capture, interval) => { assert.ok(capture.startedAt <= interval.startedAt); assert.ok(capture.finishedAt >= interval.finishedAt); };
+  for (const item of uploads.filter(item => item.capture.kind === 'screenshot')) {
+    brackets(item.capture, observed(item.name)); assert.equal(item.capture.caseId, testcase.caseId);
+    assert.ok(item.capture.startedAt >= testcase.timing.startedAt && item.capture.finishedAt <= testcase.timing.finishedAt);
+  }
+  const trace = uploads.find(item => item.capture.kind === 'trace').capture;
+  assert.ok(trace.startedAt <= observed('trace-start').startedAt); assert.ok(trace.finishedAt >= observed('trace-stop').finishedAt);
+  const video = uploads.find(item => item.capture.kind === 'video').capture;
+  assert.ok(video.startedAt <= observed('new-page').startedAt); assert.ok(video.finishedAt >= observed('context-close').finishedAt);
+  assert.equal(trace.caseId, testcase.caseId); assert.equal(video.caseId, testcase.caseId);
+  const log = uploads.find(item => item.capture.kind === 'log'); assert.equal('caseId' in log.capture, false);
+  assert.ok(log.capture.startedAt <= testcase.timing.startedAt && log.capture.finishedAt >= testcase.timing.finishedAt);
+  for (const line of log.bytes.toString().split('\n')) {
+    const time = line.slice(0, 24); assert.ok(time >= log.capture.startedAt && time <= log.capture.finishedAt);
+  }
+});
+
+test('failed capture operations never publish their absent files or replace the original failure', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-missing-capture-fixture-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  lifecycleFixture(t, { screenshotFails: true, traceFails: true });
+  const uploads = [];
+  const result = await executeAssignment({ assignment: { taskId: 'missing-capture', run: { executionTimeoutSeconds: 10 }, cases: [{ ...approved, steps: [{ action: 'screenshot', target: '' }] }] },
+    target: { platform: 'web', browser: 'chromium' }, config: readConfig({ AGENT_WORK_DIR: directory }),
+    upload: async (file, capture) => { await readFile(file); uploads.push(capture); return { id: path.basename(file), capture }; } });
+  assert.equal(result.status, 'FAILED'); assert.equal(result.cleanupOk, true);
+  assert.match(result.results[0].error, /^fixture screenshot unavailable$/);
+  assert.equal(result.results[0].steps[0].status, 'FAILED');
+  assert.deepEqual(result.infrastructureErrors, ['EXECUTOR_FAILED']);
+  assert.deepEqual(uploads.map(item => item.kind), ['video', 'log']);
+  assert.ok(result.results[0].timing.finishedAt >= result.results[0].steps[0].timing.finishedAt);
+});
+
+test('evidence multipart sends optional capture JSON and preserves legacy uploads', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-upload-timing-'));
+  const file = path.join(directory, 'execution.log'); await writeFile(file, 'upload protocol fixture');
+  const captures = [];
+  const server = http.createServer(async (req, res) => {
+    const request = new Request('http://localhost/api/agent/evidence', { method: 'POST', headers: req.headers, body: req, duplex: 'half' });
+    const form = await request.formData(); captures.push(form.get('capture'));
+    assert.equal(form.get('taskId'), 'multipart-task'); assert.equal(req.headers['x-agent-key'], 'protocol-key');
+    assert.equal(await form.get('file').text(), 'upload protocol fixture');
+    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ id: 'e1', url: '/api/evidence/e1' }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { await new Promise(resolve => server.close(resolve)); await rm(directory, { recursive: true, force: true }); });
+  const config = readConfig({ PLATFORM_URL: `http://127.0.0.1:${server.address().port}` });
+  const capture = { kind: 'log', startedAt: new Date().toISOString(), finishedAt: new Date().toISOString() };
+  await uploadEvidence(config, 'protocol-key', 'multipart-task', file, capture);
+  await uploadEvidence(config, 'protocol-key', 'multipart-task', file);
+  assert.deepEqual(JSON.parse(captures[0]), capture); assert.equal(captures[1], null);
 });
 test('bootstrap persists the once-only secret and reuses it instead of creating duplicate keys', async t => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-contract-'));
