@@ -1,0 +1,62 @@
+name: smart-test-platform
+services:
+  postgres:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_DB: platform
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run node scripts/init-env.mjs first}
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform -d platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  platform:
+    build: .
+    environment:
+      SPRING_PROFILES_ACTIVE: postgres
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/platform
+      SPRING_DATASOURCE_USERNAME: platform
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Missing database password}
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:?Missing admin password}
+      PLATFORM_EVIDENCE_DIR: /app/evidence
+      PLATFORM_TRUST_PROXY: "true"
+    ports:
+      - "8080:8080"
+    volumes:
+      - evidence:/app/evidence
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    restart: unless-stopped
+  browser-agent:
+    build:
+      context: ./agent
+    environment:
+      PLATFORM_URL: http://platform:8080
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:?Missing admin password}
+      AGENT_ID: codespace-browser
+      AGENT_NAME: Codespaces Chromium
+      AGENT_KEY_FILE: /agent-data/agent-key.json
+      AGENT_WORK_DIR: /agent-data/work
+      AGENT_ALLOW_PRIVATE_NETWORK: "true"
+    volumes:
+      - agent-data:/agent-data
+    shm_size: 1gb
+    depends_on:
+      platform:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  database:
+  evidence:
+  agent-data:

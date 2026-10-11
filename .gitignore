@@ -21,3 +21,17 @@ token
 __pycache__/
 *.pyc
 .venv/
+
+# Application build and local runtime data
+node_modules/
+dist/
+target/
+.data/
+data/
+evidence/
+playwright-report/
+test-results/
+*.log
+.env.*
+!.env.example
+
