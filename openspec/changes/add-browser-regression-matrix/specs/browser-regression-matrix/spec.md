@@ -35,6 +35,13 @@
 - **WHEN** 完成批次的中心服务和 Agent 重启
 - **THEN** 原批次、所有子任务引用和真实终态保留，证据仍受认证保护
 
+### Requirement: 环境差异与 flaky 判定
+同一用例的质量执行计数 SHALL 汇总真实结果，但只有相同代码提交且相同执行环境的不同 verdict SHALL 贡献 flaky flip 与 EWMA。不同浏览器或版本的兼容性差异 MUST NOT 自动导致 flaky 隔离。
+
+#### Scenario: 稳定的浏览器兼容差异
+- **WHEN** 同一提交在 Chromium 通过而在 Firefox 失败
+- **THEN** 矩阵记录兼容性失败，质量计数保留两个结果，跨环境比较不产生 flaky flip
+
 ### Requirement: 门户与 CLI 可操作
 门户 SHALL 提供计划发起入口、矩阵列表与轮询详情，并明确显示加载、空、错误、角色禁用与移动端布局。CLI SHALL 验证至少两个不同浏览器，显示批次链接、轮询终态并可导出聚合 JUnit，参数/API 错误返回 2。
 
