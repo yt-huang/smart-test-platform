@@ -196,9 +196,10 @@ public class PlatformService {
             var caps=capabilities(merged);
             if(sensitive&&!"local".equals(caps.get("provider"))) throw ApiException.bad("Sensitive cases cannot use cloud matrix targets");
             if(caps.containsKey("version")) caps.put("version",normalizeMatrixVersion(str(caps,"version")));
+            // Scheduling ignores blank optional constraints, so deduplication must do the same.
+            for(String field:List.of("version","brand","model")) if(str(caps,field).isBlank()) caps.remove(field);
             var identity=new LinkedHashMap<>(caps); identity.put("tags",strings(caps.get("tags")).stream().sorted().toList());
             for(String field:List.of("brand","model")) if(identity.containsKey(field)) identity.put(field,str(identity,field).toLowerCase(Locale.ROOT));
-            if("".equals(identity.get("version"))) identity.remove("version");
             if(!targets.add(identity)) throw ApiException.bad("Matrix variants must have distinct normalized capabilities");
             variants.add(map("label",label,"capabilities",caps));
         }

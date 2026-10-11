@@ -41,3 +41,11 @@ $env:PATH="$env:JAVA_HOME/bin;$env:PATH"
 ## 未验证项
 
 测试使用 H2 PostgreSQL mode、MockMvc 和模拟 Agent 报文，未宣称真实浏览器执行、PostgreSQL 服务故障注入或真实进程重启验收。历史测试用同一持久 store 建立新 PlatformService 实例验证加载；完整中心/Agent 重启、真实 Chromium/Firefox/WebKit 资源执行、门户和 CLI 联调、最终集成版本检查由主控继续验证。费用及精确模型用量未暴露。
+
+## 独立验收后续修复：空白能力去重
+
+输入后端提交 `9878f7eb220ed78d14f24b6fed5bbea8045a133a`。独立 API 验收发现 brand/model 为空时调度器忽略该约束，但去重身份仍保留字段，导致同一 Chromium 目标可以重复创建。此修复新增后续提交，不 amend 原提交。
+
+在构造目标去重身份前，将 version/brand/model 的空白值从已继承及覆盖后的能力中移除。这样实际调度语义与去重语义一致，并使响应能力也采用缺失字段表示无约束。
+
+新增 `blankBrandAndModelConstraintsNormalizeToMissingIncludingInheritedValues` 行为回归。先在原实现执行该测试，真实退出1，MockMvc 证明应为400的请求实际返回200；随后修复并执行上述相同 Java21 环境的 `mvn -B verify`，2026-10-11 23:19:28 Asia/Shanghai 退出0/BUILD SUCCESS，38项通过（矩阵21＋原回归17），0 failures/errors/skipped。新增测试覆盖空字符串、空格、tab/newline、Unicode 空白的 brand/model 组合、继承空白值及空白 version 组合，并确认请求400且 matrix/run/audit/Agent发送均无副作用。`git diff --check` 通过。未新增真实浏览器或云端验证结论。

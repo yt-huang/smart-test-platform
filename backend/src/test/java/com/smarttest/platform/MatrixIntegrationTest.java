@@ -117,6 +117,24 @@ class MatrixIntegrationTest {
                 map("label","First","capabilities",map("browser","chromium","tags",List.of("a","b"),"version","131")),
                 map("label","Second","capabilities",map("browser"," CHROMIUM ","tags",List.of("b","a","a"),"version","==0131.0")))));
     }
+    @Test void blankBrandAndModelConstraintsNormalizeToMissingIncludingInheritedValues() throws Exception {
+        enroll("a","s",List.of(target("chrome","chromium",List.of()))); var c=approved(false);
+        var p=service.savePlan(null,map("name","Queued duplicate check","caseIds",List.of(c.get("id")),"capabilities",map("platform","web","version","0")),"admin");
+        var reproduction=map("planId",p.get("id"),"variants",List.of(variant("base","chromium"),map("label","empty-brand","capabilities",map("browser","chromium","brand",""))));
+        String token=adminToken(); int rows=jdbc.queryForObject("SELECT COUNT(*) FROM platform_documents",Integer.class),messages=sent.size();
+        mvc.perform(post("/api/matrices").header("Authorization","Bearer "+token).contentType("application/json").content(json.writeValueAsString(reproduction))).andExpect(status().isBadRequest());
+        assertEquals(rows,jdbc.queryForObject("SELECT COUNT(*) FROM platform_documents",Integer.class)); assertEquals(messages,sent.size());
+        for(String brand:List.of(""," ","\t\n","\u2003")) for(String model:List.of(""," ","\t\n","\u2003")) {
+            var empty=map("browser","chromium","brand",brand,"model",model);
+            noSideEffects(map("planId",p.get("id"),"variants",List.of(variant("base","chromium"),map("label","blank","capabilities",empty))));
+        }
+        for(var inherited:List.of(map("brand",""),map("model","\t "),map("brand","\u2003","model",""))) {
+            var caps=map("platform","web","version","0"); caps.putAll(inherited);
+            p=service.savePlan(str(p,"id"),map("name","Inherited blank constraints","caseIds",List.of(c.get("id")),"capabilities",caps),"admin");
+            noSideEffects(map("planId",p.get("id"),"variants",List.of(variant("inherited","chromium"),map("label","override","capabilities",map("browser","chromium","brand","\t","model","\u2003")))));
+        }
+        noSideEffects(map("planId",p.get("id"),"variants",List.of(map("label","empty","capabilities",map("browser","chromium","version","","brand","","model","")),map("label","whitespace","capabilities",map("browser","chromium","version","\t","brand","\u2003","model"," ")))));
+    }
     @Test void boundsAndMissingWebPlanRejectWithoutRecords() {
         var p=plan(approved(false));
         noSideEffects(map("planId",p.get("id"),"variants",List.of(variant("Only","chromium"))));
