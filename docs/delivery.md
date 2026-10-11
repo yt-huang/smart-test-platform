@@ -4,7 +4,7 @@
 
 ## 实际协作与集成
 
-协调者 `/root` 负责需求契约、OpenSpec、部署、CI 和集成；真实 Codex 子 Agent `/root/backend`、`/root/frontend`、`/root/runtime` 分别在独立 Git worktree 实现；新上下文 `/root/acceptance` 负责独立业务和视觉验收。没有模拟 Agent 身份，没有调用 Kimi。设计输入为 `docs/ui-handoff.md`，契约为 `docs/implementation-handoff.md`。
+协调者 `/root` 负责需求契约、OpenSpec、部署、CI 和集成；首阶段由真实 Codex 子 Agent `/root/backend`、`/root/frontend`、`/root/runtime` 分别在独立 Git worktree 实现，新上下文 `/root/acceptance` 负责独立业务和视觉验收。后续按用户的主动跨模型协作偏好，真实 Kimi Code CLI 实现持久化校验工具，独立 Codex `/root/kimi_acceptance` 验收；主控并行处理 CI 与云端验证。设计输入为 `docs/ui-handoff.md`，契约为 `docs/implementation-handoff.md`。
 
 后端采用 Spring Boot 3.5.15 / Java 21、PostgreSQL，前端为 React/Vite，执行 Agent 与 CLI 使用 Node/Playwright。与原 Go Agent 方案的差异、单中心进程限制和内部 HTTP 的显式配置在组件实施报告中记录。
 
@@ -31,7 +31,7 @@ GitHub `main` 的应用及环境集成版本 `54d52dc` 已通过完整 GitHub Ac
 
 ## Codespaces 状态
 
-部署与验收日期：2026-10-11。工作区 `smart-test-platform-7r7vvpp6gqqhp96j` 已按 `.devcontainer` 重建，Java 21、Node 22.23.3、Docker 29.8.2、Compose 2.40.3 可用。源码通过 Git bundle 与 SSH 同步到 `54d52dc`，此后交付记录与规格归档也同步到同一工作区。GitHub `main` 已发布集成代码。
+部署与验收日期：2026-10-11。工作区 `smart-test-platform-7r7vvpp6gqqhp96j` 已按 `.devcontainer` 重建，Java 21、Node 22.23.3、Docker 29.8.2、Compose 2.40.3 可用。应用镜像的应用源码为 `54d52dc`；后续新增校验脚本、项目 skill、协作规则与交付记录通过 Git bundle 与 SSH 同步到同一工作区，与本次最终 GitHub `main` 一致（工作区 `git rev-parse HEAD` 可查询）。后续变更未改动 Java、前端或 Agent 应用代码。
 
 - 工作区：<https://smart-test-platform-7r7vvpp6gqqhp96j.github.dev>
 - 平台：<https://smart-test-platform-7r7vvpp6gqqhp96j-8080.app.github.dev>
@@ -40,10 +40,29 @@ GitHub `main` 的应用及环境集成版本 `54d52dc` 已通过完整 GitHub Ac
 - 浏览器资源 `codespace-browser-chromium` 实际报告 Chromium `156.0.8078.4`，Agent `codespace-browser` 在线并完成真实执行。
 - 云端 `ACCEPTANCE_TARGET_URL=http://host.docker.internal:8091/ node scripts/verify-e2e.mjs` 全部十一项通过。成功报告 `run-d4419b98-e45f-4628-8978-6759b49d7d2e`，故意失败报告 `run-eb9f9b5e-d7fd-474a-a9a2-d9e372b7f348`；成功报告的五份证据均非空且匿名访问被拒绝。
 - 停止平台与 Agent、重启 PostgreSQL、再启动全部服务后，重新登录验证两条用例、四条运行和成功报告仍在；五份证据下载长度一致；同一 Agent 与设备重新连接并恢复 IDLE。此为重启持久性验收，尚未替代异地灾难恢复演练。
+- 新增自动化重启校验：Kimi `b70a3f6` 候选脚本生成重启前版本 1 基线，记录全部 4 条运行、2 条用例、1 个计划及通过报告的 5 份证据 SHA-256。实际停止 Agent/平台、重启 PostgreSQL、`docker compose up -d --wait --wait-timeout 120` 后，最终已独立验收的 `a731caf` 脚本检查该基线，退出 0、`status=verified`；全部原 ID 保留，五份证据 SHA-256 一致，`codespace-browser-chromium` 与 `codespace-browser` 原身份恢复 IDLE/ONLINE。固定脚本 SHA-256 为 `ca2be99163648bf7d8e7b5da415853fbf49acf5b39bb8da36a5445f755828e90`，与独立验收相同。基线与安全结果保存在云端忽略提交的 `.data/kimi-persistence.json`、`.data/kimi-baseline-result.json`、`.data/kimi-check-result.json`。
 
 初次环境验证暴露基础 Java 镜像的未使用 Yarn apt 源签名失效、缺少 SSH 与 Git LFS；已移除该可选源，并在开发容器配置中加入 SSH 与 Git LFS。保留软件包签名验证；实际工作区也已安装 Git LFS 并完成精确源码同步。首次应用构建、postCreate 与 postStart 的真实创建日志均显示成功。
 
 管理员用户名为 `admin`。在上述工作区终端执行 `node scripts/admin-password.mjs` 查看该工作区的随机密码；密码不写入交付文档、Git 或截图。工作区停止后从工作区链接重新启动，再打开平台。
+
+## Kimi 与 Codex 的实际分工证据
+
+项目 `AGENTS.md` 已保存默认主动分配偏好，不要求用户每次启用 Kimi；项目 skill、runtime 与交接模板已随仓库保存。新环境分别核验执行工具与登录，不随 Git 复制凭据。后续其他 Agent 沿用输入提交、文件所有权、provider/model 元数据、实际退出结果与独立验收的统一交接。
+
+本机实际调用 `C:/Users/admin/.kimi-code/bin/kimi.exe` 0.29.0，显式模型别名 `kimi-code/kimi-for-coding`；从配置白名单字段核验 provider 为 `managed:kimi-code`、type `kimi`、host `api.kimi.com`。未输出认证配置。Kimi 在独立 `codex/platform-kimi` worktree 中只改动两个脚本和自己的实施报告；未推送或部署。
+
+| 实际阶段 | 输入与输出 | 真实结果 |
+| --- | --- | --- |
+| 运行前置 | 输入 `d770b75`，首次缺 Git Bash | 退出 1，1 秒；官方便携 Git 下载 SHA-256 核验后补齐 |
+| 首次代码产出 | 输入 `d770b75`，写出脚本与测试初稿 | 主控为提前交回审查暂停进程，退出 1，499 秒；不计完成 |
+| 完整实现 | 输入 `d770b75` → `b70a3f6` | CLI 退出 0，734 秒，22 项行为测试通过 |
+| 安全修复 | 输入 `b70a3f6` → `4554ff3`，复用 CLI 返回的真实 session | CLI 退出 0，391 秒，25 项测试通过 |
+| API 兼容修复 | 输入 `4554ff3` → `a731caf`，允许合法无计划运行 | CLI 退出 0，98 秒，26 项测试通过 |
+
+退出 0 表示 implemented；独立 Codex 对固定 `a731caf` 实际运行 26 项测试、34 项独立观察后给出 PASS，三个实际复现问题均由 Kimi 修复。详见 `docs/kimi-persistence-implementation.md` 与 `docs/kimi-independent-acceptance.md`。主控 cherry-pick 后再次运行 26 项测试全部通过，CI 增加软件夹具测试及真实浏览器报告的 baseline/check。云端数据库重启证据另见上文，未用 HTTP 夹具冒充真实部署。
+
+CLI 生命周期元数据及 stdout JSONL/stderr 保存在本机忽略提交的 `.data/kimi/`。底层未提供的模型版本、Kimi 与 Codespaces 实际费用均记为未知。
 
 ## 仍需接入或后续实施
 
