@@ -15,10 +15,16 @@ public class ApiController {
     public ApiController(PlatformService service,DocumentStore store) { this.service=service; this.store=store; }
     private String actor(HttpServletRequest request) { return request.getUserPrincipal().getName(); }
     @GetMapping("/health") public Map<String,Object> health() { store.list("agent"); return Map.of("status","UP","service","smart-test-platform"); }
-    @PostMapping("/auth/login") public Map<String,Object> login(@RequestBody Map<String,Object> in) { return service.login(PlatformService.required(in,"username",64),PlatformService.required(in,"password",72)); }
+    @PostMapping("/auth/login") public Map<String,Object> login(@RequestBody Map<String,Object> in) {
+        String username=PlatformService.required(in,"username",64);
+        try { return service.login(username,PlatformService.required(in,"password",72)); }
+        catch(ApiException e) { service.audit(username,"LOGIN_FAILED","auth","Authentication rejected"); throw e; }
+    }
     @GetMapping("/auth/me") public Object me(HttpServletRequest request) { return request.getAttribute("platform.user"); }
     @GetMapping("/dashboard") public Object dashboard() { return service.dashboard(); }
     @GetMapping("/settings") public Object settings() { return service.settings(); }
+    @GetMapping("/quality") public Object quality() { return service.list("quality"); }
+    @PostMapping("/quality/{caseId}/release") public Object releaseQuality(@PathVariable String caseId,@RequestBody Map<String,Object> in,HttpServletRequest req) { return service.releaseQuality(caseId,in,actor(req)); }
     @GetMapping("/cases") public Object cases() { return service.list("case"); }
     @GetMapping("/cases/{id}") public Object oneCase(@PathVariable String id) { return service.get("case",id); }
     @PostMapping("/cases") public Object createCase(@RequestBody Map<String,Object> in,HttpServletRequest req) { return service.createCase(in,actor(req)); }

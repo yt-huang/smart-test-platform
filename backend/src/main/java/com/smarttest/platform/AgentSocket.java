@@ -27,9 +27,10 @@ public class AgentSocket extends TextWebSocketHandler implements WebSocketConfig
             if(!registered.containsKey(session.getId())) {
                 if(!"register".equals(message.get("type"))) throw ApiException.unauthorized("First message must register");
                 String agent=service.register(session.getId(),message); registered.put(session.getId(),agent);
-                send(session.getId(),PlatformService.map("type","registered","agentId",agent,"heartbeatIntervalMs",10000)); service.tick();
+                service.tick();
             } else { service.agentMessage(session.getId(),message); service.tick(); }
         } catch(Exception e) {
+            service.audit(registered.getOrDefault(session.getId(),"unregistered-agent"),"AGENT_MESSAGE_REJECTED","ws/agent",e instanceof ApiException?e.getMessage():"Invalid agent message");
             send(session.getId(),PlatformService.map("type","error","message",e instanceof ApiException?e.getMessage():"Invalid agent message"));
             if(!(e instanceof ApiException api)||api.status.value()==401||api.status.value()==403) close(session.getId());
         }

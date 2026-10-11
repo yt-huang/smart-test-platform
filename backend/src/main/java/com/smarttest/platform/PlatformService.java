@@ -225,7 +225,9 @@ public class PlatformService {
         key.put("agentId",id); key.put("hostFingerprint",fingerprint); store.save("key",key);
         Map<String,Object> agent=existing==null?map("id",id,"createdAt",now(),"workspaceId","default"):existing;
         agent.putAll(map("name",text(message,"name",id,200),"hostFingerprint",fingerprint,"keyId",key.get("id"),"lastSeen",now(),"status","ONLINE","targetIds",targets.stream().map(t->str(t,"id")).toList()));
-        store.save("agent",agent); connections.put(id,session); reconcileTargets(id,targets);
+        store.save("agent",agent); reconcileTargets(id,targets);
+        // Registration acknowledgement precedes making this connection eligible for scheduling.
+        sender.accept(session,map("type","registered","agentId",id,"heartbeatIntervalMs",10000)); connections.put(id,session);
         audit(id,"REGISTER_AGENT",id,"Authenticated outbound connection"); return id;
     }
     public synchronized void agentMessage(String session,Map<String,Object> message) {
@@ -288,6 +290,7 @@ public class PlatformService {
         }
     }
     private void complete(Map<String,Object> run,Map<String,Object> device,Map<String,Object> message,String agent) {
+        boolean eligibleQuality=!terminal(run);
         var results=objects(message.get("results")); if(results.size()>200) throw ApiException.bad("Too many results");
         var expected=strings(run.get("caseIds")); Set<String> seen=new HashSet<>(); List<Map<String,Object>> verified=new ArrayList<>(); int passed=0,failed=0; long duration=0;
         var cases=objects(run.get("_cases"));
@@ -315,6 +318,7 @@ public class PlatformService {
             finish(run,failed==0&&passed==expected.size()&&cleaned?"PASSED":"FAILED",cleaned?(failed==0?"All approved cases passed":"One or more cases failed"):"Resource cleanup failed; device quarantined");
         } else store.save("run",run);
         device.put("status",cleaned&&!bool(device,"adminMaintenance",false)?"IDLE":"MAINTENANCE"); device.put("quarantined",!cleaned); device.remove("taskId"); store.save("device",device);
+        if(eligibleQuality) recordQuality(run,verified,seen);
         audit(agent,"COMPLETE_RUN",str(run,"id"),"Validated results; cleanupOk="+cleaned);
     }
     public synchronized void disconnect(String session) {
@@ -389,17 +393,41 @@ public class PlatformService {
     public synchronized Map<String,Object> evidence(String id,String actor) { var record=store.get("evidence",id); audit(actor,"DOWNLOAD_EVIDENCE",str(record,"taskId"),id); return record; }
     public synchronized String junit(String id) {
         var run=store.get("run",id); var results=objects(run.get("results")); int failed=(int)results.stream().filter(r->!"PASSED".equals(r.get("status"))).count();
-        StringBuilder xml=new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuite name=\"").append(escape(str(run,"name"))).append("\" tests=\"").append(results.size()).append("\" failures=\"").append(failed).append("\" time=\"").append(number(cast(run.get("summary")),"durationMs",0)/1000.0).append("\">");
+        boolean infrastructure=results.isEmpty()&&terminal(run)&&!"PASSED".equals(run.get("status"));
+        StringBuilder xml=new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuite name=\"").append(escape(str(run,"name"))).append("\" tests=\"").append(infrastructure?1:results.size()).append("\" failures=\"").append(failed).append("\" errors=\"").append(infrastructure?1:0).append("\" time=\"").append(number(cast(run.get("summary")),"durationMs",0)/1000.0).append("\">");
         for(var r:results) { xml.append("<testcase classname=\"smarttest\" name=\"").append(escape(str(r,"name"))).append("\" time=\"").append(number(r,"durationMs",0)/1000.0).append("\">"); if(!"PASSED".equals(r.get("status"))) xml.append("<failure message=\"").append(escape(str(r,"error"))).append("\"/>"); xml.append("</testcase>"); }
-        if(results.isEmpty()&&terminal(run)&&!"PASSED".equals(run.get("status"))) xml.append("<testcase classname=\"smarttest.infrastructure\" name=\"execution\"><error message=\"").append(escape(str(run,"message"))).append("\"/></testcase>");
+        if(infrastructure) xml.append("<testcase classname=\"smarttest.infrastructure\" name=\"execution\"><error message=\"").append(escape(str(run,"message"))).append("\"/></testcase>");
         return xml.append("<system-out>").append(escape(String.join("\n",strings(run.get("logs"))))).append("</system-out></testsuite>").toString();
     }
     public synchronized Map<String,Object> allure(String id) {
         var run=store.get("run",id);
-        var result=objects(run.get("results")).stream().map(r->map("uuid",id+"-"+r.get("caseId"),"name",r.get("name"),"status","PASSED".equals(r.get("status"))?"passed":"failed","statusDetails",map("message",r.get("error")),"steps",r.get("steps"),"attachments",r.get("evidence"),"labels",List.of(map("name","device","value",run.get("deviceId")),map("name","commit","value",run.get("commitSha"))))).toList();
+        var result=objects(run.get("results")).stream().map(r->map("uuid",id+"-"+r.get("caseId"),"name",r.get("name"),"status","PASSED".equals(r.get("status"))?"passed":"failed","statusDetails",map("message",r.get("error")),
+            "steps",objects(r.get("steps")).stream().map(s->map("name",str(s,"action")+" "+str(s,"target"),"status","PASSED".equals(s.get("status"))?"passed":"failed","statusDetails",map("message",str(s,"error")))).toList(),
+            "attachments",objects(r.get("evidence")).stream().map(e->map("name",e.get("name"),"type",e.get("contentType"),"source",e.get("url"))).toList(),
+            "labels",List.of(map("name","device","value",run.get("deviceId")),map("name","commit","value",run.get("commitSha"))))).toList();
         return map("runId",id,"status",run.get("status"),"results",result);
     }
-    private static String escape(String value) { return value.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;").replace("'","&apos;"); }
+    private void recordQuality(Map<String,Object> run,List<Map<String,Object>> results,Set<String> supplied) {
+        for(var result:results) {
+            String id=str(result,"caseId"), verdict=str(result,"status");
+            if(!supplied.contains(id)||!Set.of("PASSED","FAILED").contains(verdict))continue;
+            var metric=store.list("quality").stream().filter(q->id.equals(q.get("id"))).findFirst().orElse(map("id",id,"caseId",id,"workspaceId","default","createdAt",now(),"executions",0,"passed",0,"failed",0,"ewmaScore",0.0,"quarantined",false));
+            double score=((Number)metric.get("ewmaScore")).doubleValue(); String commit=str(run,"commitSha");
+            boolean comparable=!commit.isBlank()&&commit.equals(metric.get("lastCommitSha"))&&!str(metric,"lastVerdict").isBlank();
+            boolean flip=comparable&&!verdict.equals(metric.get("lastVerdict"));
+            if(comparable) score=Math.round((0.2*(flip?1:0)+0.8*score)*1_000_000.0)/1_000_000.0;
+            if(flip&&score>=0.15&&!bool(metric,"quarantined",false)) {
+                metric.put("quarantined",true); metric.put("quarantinedAt",now()); metric.put("quarantineReason","Verdict changed for identical commit SHA; EWMA >= 0.15"); audit("quality","QUARANTINE_CASE",id,"EWMA="+score);
+            }
+            metric.putAll(map("name",result.get("name"),"executions",number(metric,"executions",0)+1,"passed",number(metric,"passed",0)+(verdict.equals("PASSED")?1:0),"failed",number(metric,"failed",0)+(verdict.equals("FAILED")?1:0),"ewmaScore",score,"lastCommitSha",commit,"lastVerdict",verdict,"lastRunId",run.get("id"),"updatedAt",now()));
+            store.save("quality",metric);
+        }
+    }
+    public synchronized Map<String,Object> releaseQuality(String caseId,Map<String,Object> in,String actor) {
+        var metric=store.get("quality",caseId); String reason=required(in,"reason",1000); if(reason.strip().length()<5)throw ApiException.bad("Provide a meaningful review reason");
+        metric.putAll(map("quarantined",false,"releasedBy",actor,"releasedAt",now(),"releaseReason",reason,"updatedAt",now())); store.save("quality",metric); audit(actor,"RELEASE_QUALITY_QUARANTINE",caseId,reason); return metric;
+    }
+    private static String escape(String value) { return value.replaceAll("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]","").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;").replace("'","&apos;"); }
 
     private static class LoginAttempts { int failures; Instant since=Instant.now(); }
     private static void validatePassword(String value) {
@@ -426,6 +454,6 @@ public class PlatformService {
     private Map<String,Object> publicUser(Map<String,Object> u) { return map("id",u.get("id"),"username",u.get("username"),"displayName",u.get("displayName"),"role",u.get("role")); }
     private Map<String,Object> publicDocument(String kind,Map<String,Object> value) {
         if(kind.equals("user")) return publicUser(value);
-        var out=new LinkedHashMap<>(value); out.keySet().removeIf(k->k.startsWith("_")||Set.of("passwordHash","keyHash","quarantined","taskId","adminMaintenance","path","completionReceived").contains(k)); return out;
+        var out=new LinkedHashMap<>(value); out.keySet().removeIf(k->k.startsWith("_")||Set.of("passwordHash","keyHash","taskId","adminMaintenance","path","completionReceived").contains(k)||kind.equals("device")&&k.equals("quarantined")); return out;
     }
 }

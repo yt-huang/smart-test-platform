@@ -24,6 +24,7 @@ public class SecurityConfig {
         http.authorizeHttpRequests(a->a
             .requestMatchers("/api/health","/api/auth/login","/api/agent/evidence","/ws/agent").permitAll()
             .requestMatchers(HttpMethod.GET,"/api/**").authenticated()
+            .requestMatchers("/api/quality/**").hasAnyRole("ADMIN","TESTER")
             .requestMatchers("/api/users/**","/api/agent-keys/**","/api/devices/**").hasRole("ADMIN")
             .requestMatchers("/api/cases/**","/api/plans/**","/api/runs/**").hasAnyRole("ADMIN","TESTER","DEVELOPER")
             .requestMatchers("/api/**").denyAll().anyRequest().permitAll());

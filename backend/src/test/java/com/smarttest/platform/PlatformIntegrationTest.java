@@ -153,6 +153,30 @@ class PlatformIntegrationTest {
         assertEquals("passed",objects(service.allure(str(run,"id")).get("results")).getFirst().get("status"));
         assertThrows(ApiException.class,()->service.uploadEvidence(str(key,"key"),str(run,"id"),file));
     }
+    @Test void qualityUsesActualSameCommitVerdictFlipsAndHumanReleaseOnly() throws Exception {
+        enroll("a","s",List.of(target("d","local",List.of()))); var c=approved(false);
+        var one=service.createRun(map("caseIds",List.of(c.get("id")),"commitSha","abc123"),"admin"); complete("s",one,c,true);
+        var two=service.createRun(map("caseIds",List.of(c.get("id")),"commitSha","abc123"),"admin");
+        var done=map("type","done","taskId",two.get("id"),"results",List.of(result(c,"FAILED")),"cleanupOk",true);
+        service.agentMessage("s",done); service.agentMessage("s",done);
+        var quality=service.get("quality",str(c,"id")); assertEquals(2,quality.get("executions")); assertEquals(0.2,((Number)quality.get("ewmaScore")).doubleValue()); assertEquals(true,quality.get("quarantined"));
+        var three=service.createRun(map("caseIds",List.of(c.get("id")),"commitSha","different-commit"),"admin"); complete("s",three,c,true);
+        assertEquals(true,service.get("quality",str(c,"id")).get("quarantined"));
+        assertThrows(ApiException.class,()->service.releaseQuality(str(c,"id"),map("reason","x"),"admin"));
+        service.createUser(map("username","reader","password","ReaderPassword123!","role","VIEWER"),"admin");
+        String token=str(service.login("reader","ReaderPassword123!"),"token");
+        mvc.perform(post("/api/quality/"+c.get("id")+"/release").header("Authorization","Bearer "+token).contentType("application/json").content("{\"reason\":\"Verified a real fix\"}")).andExpect(status().isForbidden());
+        mvc.perform(post("/api/quality/"+c.get("id")+"/release").header("Authorization","Bearer "+adminToken()).contentType("application/json").content("{\"reason\":\"Verified a real fix\"}")).andExpect(status().isOk());
+        assertEquals(false,service.get("quality",str(c,"id")).get("quarantined"));
+        assertTrue(service.list("audit").stream().anyMatch(a->"RELEASE_QUALITY_QUARANTINE".equals(a.get("action"))));
+    }
+    @Test void infrastructureJUnitCountersAndXmlEscapingRemainValid() throws Exception {
+        var c=approved(false); var run=service.createRun(map("caseIds",List.of(c.get("id")),"name","A < B & quoted \"text\""),"admin");
+        service.cancelRun(str(run,"id"),"admin");
+        String xml=service.junit(str(run,"id"));
+        var document=javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(new java.io.ByteArrayInputStream(xml.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        assertEquals("1",document.getDocumentElement().getAttribute("tests")); assertEquals("1",document.getDocumentElement().getAttribute("errors")); assertEquals("A < B & quoted \"text\"",document.getDocumentElement().getAttribute("name"));
+    }
     @Test void serializationRetainsAllocationLockUntilTransactionCommit() throws Exception {
         enroll("a","s",List.of(target("d","local",List.of()))); var c=approved(false);
         CountDownLatch beforeCommit=new CountDownLatch(1),releaseCommit=new CountDownLatch(1); AtomicBoolean first=new AtomicBoolean(true); AtomicInteger assignments=new AtomicInteger();
