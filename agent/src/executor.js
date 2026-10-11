@@ -86,16 +86,19 @@ export async function executeAssignment({ assignment, target, config, signal, up
         try { validateCase(testCase); }
         catch (error) { infrastructureErrors.add('CASE_VALIDATION_FAILED'); throw error; }
         progress(`Running ${testCase.name}`); log(`Case started: ${testCase.name}`);
-        context = await browser.newContext({ recordVideo: { dir: directory }, viewport: { width: 1280, height: 720 }, acceptDownloads: false });
-        assertActive();
-        context.setDefaultTimeout(config.stepTimeoutMs);
-        context.setDefaultNavigationTimeout(config.stepTimeoutMs);
-        await context.route('**/*', async route => {
-          try { await checkUrlAllowed(route.request().url(), config.allowPrivateNetwork); await route.continue(); }
-          catch (error) { log(`Request blocked: ${message(error)}`); await route.abort('blockedbyclient').catch(() => {}); }
-        });
-        await context.tracing.start({ screenshots: true, snapshots: true, sources: true }); traceStarted = true;
-        page = await context.newPage(); video = page.video();
+        try {
+          context = await browser.newContext({ recordVideo: { dir: directory }, viewport: { width: 1280, height: 720 }, acceptDownloads: false });
+          assertActive();
+          context.setDefaultTimeout(config.stepTimeoutMs);
+          context.setDefaultNavigationTimeout(config.stepTimeoutMs);
+          await context.route('**/*', async route => {
+            try { await checkUrlAllowed(route.request().url(), config.allowPrivateNetwork); await route.continue(); }
+            catch (error) { log(`Request blocked: ${message(error)}`); await route.abort('blockedbyclient').catch(() => {}); }
+          });
+          await context.tracing.start({ screenshots: true, snapshots: true, sources: true }); traceStarted = true;
+          page = await context.newPage(); video = page.video();
+        } catch (error) { infrastructureErrors.add('EXECUTOR_FAILED'); throw error; }
+        page.on('crash', () => infrastructureErrors.add('EXECUTOR_FAILED'));
         page.on('console', item => log(`console.${item.type()}: ${item.text()}`));
         page.on('pageerror', error => log(`pageerror: ${message(error)}`));
         page.on('requestfailed', request => log(`requestfailed: ${request.url()} ${request.failure()?.errorText}`));
@@ -118,6 +121,7 @@ export async function executeAssignment({ assignment, target, config, signal, up
         const file = path.join(directory, `${prefix}-complete.png`);
         await page.screenshot({ path: file, fullPage: true }); evidenceFiles.push({ file, result });
       } catch (error) {
+        if (browser && !browser.isConnected()) infrastructureErrors.add('EXECUTOR_FAILED');
         result.status = 'FAILED'; result.error = controller.signal.aborted ? message(abortError()) : message(error);
         log(`${testCase.name}: ${result.error}`);
         if (page && !page.isClosed()) {
@@ -127,11 +131,11 @@ export async function executeAssignment({ assignment, target, config, signal, up
       } finally {
         if (traceStarted) {
           const file = path.join(directory, `${prefix}-trace.zip`);
-          await context.tracing.stop({ path: file }).then(() => evidenceFiles.push({ file, result })).catch(error => log(`Trace could not finalize: ${message(error)}`));
+          await context.tracing.stop({ path: file }).then(() => evidenceFiles.push({ file, result })).catch(error => { infrastructureErrors.add('EXECUTOR_FAILED'); log(`Trace could not finalize: ${message(error)}`); });
         }
         await closeContext().catch(error => { cleanupOk = false; log(`Context cleanup failed: ${message(error)}`); });
         if (context?.pages().length) { cleanupOk = false; log('Context still has open pages after close'); }
-        if (video) await video.path().then(file => evidenceFiles.push({ file, result })).catch(error => log(`Video could not finalize: ${message(error)}`));
+        if (video) await video.path().then(file => evidenceFiles.push({ file, result })).catch(error => { infrastructureErrors.add('EXECUTOR_FAILED'); log(`Video could not finalize: ${message(error)}`); });
         result.durationMs = Date.now() - caseStarted;
       }
     }
@@ -166,7 +170,7 @@ export async function executeAssignment({ assignment, target, config, signal, up
     // Only remove the generated child directory after all evidence is safely stored and browser closure is verified.
     if (cleanupOk && uploadsOk && path.dirname(directory) === path.resolve(config.artifactsDir)) await rm(directory, { recursive: true, force: true }).catch(error => log(`Artifact cleanup failed: ${message(error)}`));
   }
-  return { type: 'done', taskId: assignment.taskId, status: results.length && results.every(result => result.status === 'PASSED') ? 'PASSED' : 'FAILED', results, logs, cleanupOk, infrastructureErrors: [...infrastructureErrors], durationMs: Date.now() - started };
+  return { type: 'done', taskId: assignment.taskId, status: results.length && infrastructureErrors.size === 0 && results.every(result => result.status === 'PASSED') ? 'PASSED' : 'FAILED', results, logs, cleanupOk, infrastructureErrors: [...infrastructureErrors], durationMs: Date.now() - started };
 }
 
 async function performStep(page, step, config, signal, screenshot) {

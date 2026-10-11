@@ -8,7 +8,8 @@ import http from 'node:http';
 import { readConfig } from '../src/config.js';
 import { resolveAgentKey, uploadEvidence } from '../src/platform.js';
 import { AgentClient } from '../src/client.js';
-import { validateCase, checkUrlAllowed } from '../src/executor.js';
+import { validateCase, checkUrlAllowed, executeAssignment } from '../src/executor.js';
+import { browserTypes } from '../src/browsers.js';
 
 const approved = { id: 'c1', name: 'case', status: 'APPROVED', platform: 'web', framework: 'playwright', steps: [{ action: 'goto', target: 'https://example.com' }] };
 test('configuration rejects malformed identity, browser, URL and timeout', () => {
@@ -24,6 +25,21 @@ test('private targets require the trusted agent setting', async () => {
   await assert.rejects(checkUrlAllowed('http://127.0.0.1/', false), /Private network/);
   await checkUrlAllowed('http://127.0.0.1/', true);
   await assert.rejects(checkUrlAllowed('file:///tmp/x', true), /HTTP/);
+});
+
+test('executor initialization fixture cannot turn a resource fault into an ordinary assertion failure', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-init-fixture-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  let connected = true;
+  t.mock.method(browserTypes.chromium, 'launch', async () => ({
+    newContext: async () => { throw new Error('synthetic browser context initialization failure'); },
+    close: async () => { connected = false; }, isConnected: () => connected,
+  }));
+  const result = await executeAssignment({ assignment: { taskId: 'init-fixture', run: { executionTimeoutSeconds: 10 }, cases: [approved] },
+    target: { platform: 'web', browser: 'chromium' }, config: readConfig({ AGENT_WORK_DIR: directory }), upload: async () => ({ id: 'log-fixture' }) });
+  assert.equal(result.status, 'FAILED'); assert.equal(result.cleanupOk, true);
+  assert.deepEqual(result.infrastructureErrors, ['EXECUTOR_FAILED']);
+  assert.match(result.results[0].error, /context initialization/);
 });
 test('bootstrap persists the once-only secret and reuses it instead of creating duplicate keys', async t => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'agent-contract-'));
