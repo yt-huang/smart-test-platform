@@ -122,7 +122,10 @@ try {
   checks.push('new submission after release blocks actual assertion failure');
   const timeoutPlan = await request('/plans', 'POST', { ...plan, name: `Gate unavailable ${stamp}`, queueTimeoutSeconds: 2 });
   const tm = await request('/matrices', 'POST', { planId: timeoutPlan.id, name: `Gate real queue timeout ${stamp}`, variants: variants.map(v => ({ ...v, capabilities: { ...v.capabilities, version: '=0' } })) }); pending.set(tm.id, 'matrices');
-  const timedOut = await finish('matrices', tm.id); validateGate(timedOut, 'BLOCKED'); assert.equal(timedOut.gate.infrastructureFailures, 2); checks.push('unavailable target timeout matrix always blocks');
+  const timedOut = await finish('matrices', tm.id); validateGate(timedOut, 'BLOCKED');
+  assert.ok(timedOut.variants.every(v => v.status === 'TIMED_OUT' && v.gate.infrastructureFailures > 0));
+  assert.equal(timedOut.gate.infrastructureFailures, timedOut.variants.reduce((sum, v) => sum + v.gate.infrastructureFailures, 0));
+  checks.push('unavailable target timeout matrix always blocks');
 
   const viewerName = `gate-viewer-${stamp}`, viewerPassword = `Gate-viewer-${stamp}-password`;
   await request('/users', 'POST', { username: viewerName, password: viewerPassword, displayName: 'Gate acceptance viewer', role: 'VIEWER' });

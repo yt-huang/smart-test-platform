@@ -71,6 +71,19 @@ PLATFORM_URL=http://localhost:8080 PLATFORM_TOKEN="$TOKEN" node cli/src/index.js
 
 完整记录见 [矩阵回归交付](docs/matrix-delivery.md)。真机矩阵、设备预约与 Top 20 性能验收继续按原规格推进。
 
+## 隔离用例与 CI 门禁
+
+运行和矩阵报告分别保留原始执行结果与门禁判定。已隔离的用例仍真实执行，纯用例失败可按警告放行；首次触发隔离的失败仍阻塞，缺失结果、取消、超时、资源清理或执行器故障也阻塞。隔离集合在提交时冻结，判定和门禁报告在首次终态冻结，后续人工复核不改历史。
+
+默认 CLI 仍按原始失败退出 1。CI 显式使用 `--gate` 选择门禁策略，PASSED/WARN 退出 0，BLOCKED 退出 1，畸形响应或报告退出 2；`--gate --junit` 下载独立门禁 JUnit，原报告继续保留真实失败。
+
+```bash
+node cli/src/index.js run --plan PLAN_ID --gate --junit gate.xml
+node cli/src/index.js matrix --plan PLAN_ID --browsers chromium,firefox --gate --junit matrix-gate.xml
+```
+
+以上命令需已设置 `PLATFORM_URL` 与 `PLATFORM_TOKEN`。门禁记录见 [交付记录](docs/gate-delivery.md)。工单与告警通知尚待实际接入。
+
 ## 验收
 
 ```bash
@@ -86,6 +99,8 @@ mvn -f backend/pom.xml verify
 node scripts/verify-e2e.mjs
 # Agent 启用并安装 Chromium + Firefox 后
 node scripts/verify-matrix.mjs
+# 用同一审批用例真实触发隔离、警告门禁与人工释放
+node scripts/verify-gate.mjs
 ```
 
 验收包含真实浏览器成功/失败执行、草稿审核门禁、证据鉴权、报告导出、超时、取消、RBAC 和资源清理。GitHub Actions 自动执行相同闭环。
