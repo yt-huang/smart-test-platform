@@ -1,0 +1,10 @@
+import { execFileSync } from 'node:child_process';
+import { readFileSync, mkdirSync } from 'node:fs';
+const name = process.argv[2];
+if (!name || !/^[a-z0-9-]+$/.test(name)) throw new Error('Usage: node scripts/sync-codespace.mjs CODESPACE_NAME');
+mkdirSync('.data', { recursive: true });
+execFileSync('git', ['bundle', 'create', '.data/source.bundle', 'HEAD'], { stdio: 'inherit' });
+const command = 'mkdir -p /workspaces/smart-test-platform/.data && cat > /workspaces/smart-test-platform/.data/source.bundle && cd /workspaces/smart-test-platform && git fetch .data/source.bundle HEAD && git switch --detach FETCH_HEAD';
+const output = execFileSync('gh', ['codespace', 'ssh', '-c', name, '--', command], { input: readFileSync('.data/source.bundle'), maxBuffer: 4 * 1024 * 1024 });
+process.stdout.write(output);
+console.log('Codespace source synchronized to the exact local commit. Runtime data preserved.');
