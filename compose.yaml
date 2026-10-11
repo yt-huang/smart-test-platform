@@ -50,7 +50,8 @@ services:
       PLATFORM_URL: http://platform:8080
       PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:?Missing admin password}
       AGENT_ID: codespace-browser
-      AGENT_NAME: Codespaces Chromium
+      AGENT_NAME: Codespaces Browser Matrix
+      AGENT_BROWSERS: chromium,firefox,webkit
       AGENT_KEY_FILE: /agent-data/agent-key.json
       AGENT_WORK_DIR: /agent-data/work
       AGENT_ARTIFACTS_DIR: /agent-data/artifacts

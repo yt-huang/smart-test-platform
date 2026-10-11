@@ -18,6 +18,7 @@ jobs:
       AGENT_WORK_DIR: /tmp/platform-agent
       AGENT_KEY_FILE: /tmp/platform-agent/key.json
       AGENT_ALLOW_PRIVATE_NETWORK: 'true'
+      AGENT_BROWSERS: chromium,firefox
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,7 +40,7 @@ jobs:
           npm test --prefix agent
           npm ci --prefix cli
           npm test --prefix cli
-          npx --prefix agent playwright install --with-deps chromium
+          npx --prefix agent playwright install --with-deps chromium firefox
       - name: Test and package central platform
         run: |
           mkdir -p backend/src/main/resources/static
@@ -50,6 +51,8 @@ jobs:
           java -jar backend/target/*.jar > /tmp/platform-backend.log 2>&1 &
           npm start --prefix agent > /tmp/platform-agent.log 2>&1 &
           node scripts/verify-e2e.mjs
+      - name: Verify real browser regression matrices
+        run: node scripts/verify-matrix.mjs
       - name: Check live reports and evidence integrity
         run: |
           node scripts/verify-persistence.mjs baseline --snapshot /tmp/platform-persistence.json
