@@ -44,6 +44,20 @@
 - `npm test --prefix frontend`：退出 0，24/24 通过（utils 7 + matrixUtils 9 + gateUtils 8），duration ≈83ms。
 - `npm run build --prefix frontend`：退出 0，vite v6.4.4，1594 modules transformed，dist 正常产出（index CSS 51.90 kB / JS 351.87 kB）。
 
+## 二次复审修正（针对 013ef91 的独立 Codex 审查）
+
+独立 Codex 复审 `013ef91` 发现 `isGateDataValid` 仍接受 `strict-legacy-v1` WARN（total1 / passed0 / blockingFailures0 / quarantinedFailures1 / infrastructureFailures0 / quarantinedCaseIds[]）——历史无快照任务按 contract v1 必须为空隔离集并按真实结果保守判定，legacy 出现隔离失败即矛盾，且 `quarantinedCaseIds` 完全未校验。本轮仅改 `frontend/src/gateUtils.js`、`frontend/src/gateUtils.test.js` 与本报告：
+
+- 补齐隔离 ID 约束：`quarantinedCaseIds` 必须为数组，每项为非空字符串，彼此唯一，且数量不得超过 total（矩阵聚合按去重后 ID 集合公开）。
+- 补齐 policy 约束：`strict-legacy-v1` 必须 ID 集为空且 quarantinedFailures 恒为 0（legacy WARN 因此不可能合法存在）；单运行策略 `quarantine-at-submission-v1` 的隔离失败只能来自提交时冻结的集合，quarantinedFailures 不得超过 ID 数；`aggregate-v1` 按子任务求和计数、ID 去重，不同目标可重复计入同一 ID，允许 quarantinedFailures 大于去重后 ID 数，其余计数一致规则（终态计数和、PASSED/WARN/BLOCKED 语义、PENDING 上限）保持不变。
+- 新增行为测试：legacy WARN 载荷判不可用、legacy 带非空 ID 或隔离失败判不可用、缺失/重复/空白/非字符串/非数组/超 total 的 ID 集判不可用、单运行 quarantinedFailures 超过 ID 数判不可用且少于等于 ID 数时放行、aggregate-v1 两个目标同一 ID 计 2 次隔离失败（quarantinedFailures2 / uniqueID1）判可用、aggregate ID 重复或畸形仍判不可用；原有矛盾成功与矩阵拒绝负向测试全部保持通过，未回退。
+- 数据不可用时门户仍显示“门禁数据不可用，仅展示原始执行结果，不推断为通过”，渲染层（`gate.jsx`）无改动。
+
+二次复审后真实检查结果（取代上方第一轮与复审后的数字）：
+
+- `npm test --prefix frontend`：退出 0，25/25 通过（utils 7 + matrixUtils 9 + gateUtils 9），duration ≈61ms。
+- `npm run build --prefix frontend`：退出 0，vite v6.4.4，1594 modules transformed，dist 正常产出（index CSS 51.90 kB / JS 352.14 kB）。
+
 ## 状态与未验收事项
 
 - implement 状态：implemented（代码 + 单测 + 构建完成）。
