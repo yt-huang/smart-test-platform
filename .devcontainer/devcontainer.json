@@ -3,6 +3,7 @@
   "build": { "dockerfile": "Dockerfile" },
   "features": {
     "ghcr.io/devcontainers/features/node:2": { "version": "22", "installYarnUsingApt": false },
+    "ghcr.io/devcontainers/features/sshd:1": { "version": "latest" },
     "ghcr.io/devcontainers/features/docker-in-docker:2": {}
   },
   "forwardPorts": [8080],
