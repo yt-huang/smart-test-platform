@@ -582,6 +582,34 @@ test('check fails with nonzero exit when resources never recover before the dead
   });
 });
 
+test('baseline and check pass for a direct-caseIds run with no plan (plans=0)', async (t) => {
+  await withFixture(t, async ({ state, platformUrl, dir }) => {
+    // PlatformService.createRun accepts direct caseIds with planId '' — a
+    // completed PASSED run with evidence can legitimately coexist with [].
+    state.evidence.set('ev-1', Buffer.from('direct-run-evidence'));
+    state.cases.push({ id: 'case-1', name: 'Direct case', status: 'APPROVED', revision: 1 });
+    state.devices.push({ id: 'dev-1', name: 'chromium-node', platform: 'web', status: 'IDLE', agentId: 'agent-1' });
+    state.agents.push({ id: 'agent-1', name: 'agent-one', status: 'ONLINE', targetIds: ['dev-1'] });
+    state.runs.push({
+      id: 'run-direct', name: 'Direct run', status: 'PASSED', planId: '', caseIds: ['case-1'],
+      commitSha: 'def456', createdAt: '2026-10-10T00:00:00Z', finishedAt: '2026-10-10T00:01:00Z',
+      summary: { passed: 1, failed: 0, total: 1 },
+      results: [{ caseId: 'case-1', status: 'PASSED', evidence: [{ id: 'ev-1', name: 'shot.png', url: '/api/evidence/ev-1' }] }],
+      deviceId: 'dev-1', agentId: 'agent-1',
+    });
+    const snapshot = path.join(dir, 'persistence.json');
+    const baseline = await runCli(['baseline', '--snapshot', snapshot], { platformUrl, password: state.password, cwd: dir });
+    assert.equal(baseline.code, 0, baseline.stderr);
+    const doc = JSON.parse(readFileSync(snapshot, 'utf8'));
+    assert.deepEqual(doc.planIds, []);
+    assert.deepEqual(doc.reports.map(r => r.id), ['run-direct']);
+    assert.match(baseline.stdout, /"plans": 0/);
+    const check = await runCli(['check', '--snapshot', snapshot, '--wait-seconds', '2'], { platformUrl, password: state.password, cwd: dir });
+    assert.equal(check.code, 0, check.stderr);
+    assert.match(check.stdout, /"plansRetained": 0/);
+  });
+});
+
 test('usage errors exit nonzero without touching the platform', async (t) => {
   await withFixture(t, async ({ state, platformUrl, dir }) => {
     seedDeployment(state);

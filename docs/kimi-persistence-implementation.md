@@ -1,4 +1,12 @@
-# Kimi 持久化验证脚本实施报告（第二轮：阻断修复）
+# Kimi 持久化验证脚本实施报告（第三轮：API 兼容修正）
+
+## 第三轮输入（针对 4554ff3 的最小修正）
+
+- 输入提交（本轮实现前 `git rev-parse HEAD` 实测）：`4554ff395e4727a355a924fd79381feabe02a7d1`（第二轮交付）
+- 触发：Codex 独立验收复现合法 API 兼容问题——`PlatformService.createRun` 的 planId 可选（默认空串）且接受直接 caseIds，因此完全可能存在"已完成 PASSED + 有证据 + 设备/Agent 身份齐全，但 `plans=[]`、`run.planId=''`"的真实部署，而旧校验要求 planIds 非空，误拒该部署。
+- 修正（最小范围，未重写脚本）：baseline 的空部署检查与 `validateSnapshot` 的 `idList` 现仅要求 `runIds`/`caseIds` 非空，`planIds` 允许为空数组；plans 存在时其 ID 仍全部被保留和校验。空快照/无通过报告/证据/资源身份的证明要求均未削弱。
+- 新增 1 个行为测试：直接 caseIds（planId=''、plans=[]）的完整通过报告，baseline 与 check 均以 plans=0 通过。
+- 实测：`node --test scripts/verify-persistence.test.mjs` → `# tests 26 / # pass 26 / # fail 0`，退出码 0。
 
 ## 第二轮输入（针对 b70a3f6 的小范围修复）
 

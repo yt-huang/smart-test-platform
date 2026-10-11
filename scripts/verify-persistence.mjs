@@ -186,8 +186,11 @@ async function baseline({ origin, base, password, snapshot }) {
   const runIds = runs.map(r => r?.id).filter(nonEmptyString);
   const caseIds = cases.map(c => c?.id).filter(nonEmptyString);
   const planIds = plans.map(p => p?.id).filter(nonEmptyString);
-  if (runIds.length === 0 || caseIds.length === 0 || planIds.length === 0) {
-    throw new VerifyError('deployment has no runs, cases or plans to retain; an empty deployment cannot prove recovery');
+  // Runs launched directly from caseIds legitimately have no plan (planId ''),
+  // so only runs and cases are mandatory for retention; plans are still fully
+  // retained whenever they exist.
+  if (runIds.length === 0 || caseIds.length === 0) {
+    throw new VerifyError('deployment has no runs or cases to retain; an empty deployment cannot prove recovery');
   }
 
   const devicesById = new Map(devices.map(d => [d?.id, d]));
@@ -284,17 +287,19 @@ function validateSnapshot(doc, snapshot) {
   if (doc.version !== SNAPSHOT_VERSION) fail(`unsupported version ${doc.version ?? '(missing)'}`);
   if (!nonEmptyString(doc.createdAt)) fail('missing createdAt');
   if (!nonEmptyString(doc.platformUrl)) fail('missing platformUrl');
-  const idList = (key) => {
+  const idList = (key, { allowEmpty = false } = {}) => {
     if (!Array.isArray(doc[key])) fail(`missing a valid "${key}" list`);
     const ids = doc[key];
-    if (ids.length === 0) fail(`"${key}" is empty; a vacuous snapshot cannot prove persistence`);
+    if (ids.length === 0 && !allowEmpty) fail(`"${key}" is empty; a vacuous snapshot cannot prove persistence`);
     for (const id of ids) if (!nonEmptyString(id)) fail(`"${key}" contains an empty or non-string id`);
     if (new Set(ids).size !== ids.length) fail(`"${key}" contains duplicate ids`);
     return ids;
   };
   const runIds = idList('runIds');
   const caseIds = idList('caseIds');
-  const planIds = idList('planIds');
+  // planIds may be empty: runs created directly from caseIds have no plan,
+  // and every listed plan ID is still checked whenever plans exist.
+  const planIds = idList('planIds', { allowEmpty: true });
   if (!Array.isArray(doc.reports) || doc.reports.length === 0) {
     fail('no integrity reports; require at least one completed PASSED report with nonempty evidence');
   }
