@@ -1,0 +1,4 @@
+- [ ] Actual Kimi CLI implements reusable persistence verifier and behavior tests in an isolated worktree
+- [ ] Fresh Codex reviewer inspects the diff and independently runs failure checks
+- [ ] Coordinator runs baseline, restarts actual Codespaces services, and runs check
+- [ ] Integrate checked code, CI, actual executor metadata and verification evidence
