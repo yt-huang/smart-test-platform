@@ -20,6 +20,9 @@
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 .fingerprint-fields{display:grid;grid-template-columns:1fr 1fr;gap:11px 20px;margin:0}.fingerprint-fields dt{font-size:9px!important;color:#9caeb8!important;margin-bottom:3px!important}.fingerprint-fields dd{font-size:10px!important;color:#718e9e!important;overflow-wrap:anywhere}@media(max-width:540px){.fingerprint-fields{gap:10px 16px}}
 .quality-panel>.error-notice{margin:0 24px 17px}.quality-explainer{display:flex;align-items:flex-start;gap:8px;background:#f6faf8;border-top:1px solid #e9f1ed;border-bottom:1px solid #e9f1ed;padding:13px 24px;color:#87a497;font-size:10px;line-height:1.9}.quality-explainer svg{margin-top:3px}.quality-score{font-family:Consolas,monospace;color:#78969b;font-size:12px}.quality-readonly{font-size:9px;color:#a7b5bb}.quality-report-link{margin:0 0 19px}.quality-panel td .result-count{font-size:9px;margin-top:5px}@media(max-width:540px){.quality-explainer{padding:12px 18px;font-size:9px}}
+.matrix-metrics strong>span{display:inline;font-size:inherit;font-weight:inherit;color:inherit;margin:0}
+.matrix-metrics strong>span.pass-text{color:#078569}
+.matrix-metrics strong>span.fail-text{color:var(--red)}
 .matrix-metrics{grid-template-columns:repeat(6,1fr)}
 .browser-field{border:0;padding:0;margin:0 0 19px;min-width:0}
 .browser-field>legend{padding:0;font-size:11px;font-weight:500;color:#526f79}

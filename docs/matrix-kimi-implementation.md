@@ -54,6 +54,12 @@
 
 第三轮实际命令与退出结果：`npm test --prefix frontend` 退出 0（16/16 通过）；`npm run build --prefix frontend` 退出 0（vite 6.4.4）。
 
+## 独立验收修复（第四轮）
+
+独立真实截图（`desktop-passed.png`）发现矩阵统计卡「用例通过 / 失败」中 strong 内的 `<span>` 被既有 `.report-metrics span` 标签选择器命中，变成小字号浅色块级，与「/」分隔符视觉不一致。本轮仅修改 `frontend/src/styles.css`：新增 `.matrix-metrics strong>span` 覆盖为 inline、继承 strong 的大字号与字重，并单独恢复 pass-text / fail-text 颜色；选择器限定在 `.matrix-metrics` 内，不影响执行记录（runs）报告的既有标签样式。
+
+第四轮实际命令与退出结果：`npm test --prefix frontend` 退出 0（16/16 通过）；`npm run build --prefix frontend` 退出 0（vite 6.4.4）。修复后的视觉效果未在本环境截图复核，最终浏览器复核由独立 Codex 完成，未执行的截图验证不声称已做。
+
 ## 耗时
 
 - 首轮：首次实际外部 CLI metadata 为 405 秒（以主控核验为准，此前报告中“约 35 分钟”为错误估算，作废）。
