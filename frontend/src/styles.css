@@ -20,3 +20,18 @@
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 .fingerprint-fields{display:grid;grid-template-columns:1fr 1fr;gap:11px 20px;margin:0}.fingerprint-fields dt{font-size:9px!important;color:#9caeb8!important;margin-bottom:3px!important}.fingerprint-fields dd{font-size:10px!important;color:#718e9e!important;overflow-wrap:anywhere}@media(max-width:540px){.fingerprint-fields{gap:10px 16px}}
 .quality-panel>.error-notice{margin:0 24px 17px}.quality-explainer{display:flex;align-items:flex-start;gap:8px;background:#f6faf8;border-top:1px solid #e9f1ed;border-bottom:1px solid #e9f1ed;padding:13px 24px;color:#87a497;font-size:10px;line-height:1.9}.quality-explainer svg{margin-top:3px}.quality-score{font-family:Consolas,monospace;color:#78969b;font-size:12px}.quality-readonly{font-size:9px;color:#a7b5bb}.quality-report-link{margin:0 0 19px}.quality-panel td .result-count{font-size:9px;margin-top:5px}@media(max-width:540px){.quality-explainer{padding:12px 18px;font-size:9px}}
+.matrix-metrics{grid-template-columns:repeat(6,1fr)}
+.browser-checks{display:flex;gap:9px;flex-wrap:wrap}
+.browser-check{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--border);background:#fff;border-radius:7px;padding:8px 13px;font-size:11px;color:#617780;cursor:pointer}
+.browser-check input{accent-color:var(--teal)}
+.browser-check.on{border-color:#bfe0d5;background:var(--teal-soft);color:var(--teal-dark)}
+.junit-action{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
+.junit-action small{font-size:9px}
+.fingerprint-inline{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:#718e9e;max-width:280px;overflow-wrap:anywhere}
+.fingerprint-inline>svg{flex:none;color:#9caeb8}
+.fingerprint-empty{display:inline-flex;align-items:center;gap:5px;font-size:10px}
+.variant-message{max-width:200px;overflow-wrap:anywhere}
+.poll-label.inline{margin-left:8px}
+.readonly-note{margin:4px 2px 0;font-size:10px}
+@media(max-width:1250px){.matrix-metrics{grid-template-columns:repeat(3,1fr)}.matrix-metrics>div:nth-child(3){border-right:0}}
+@media(max-width:800px){.matrix-metrics{grid-template-columns:1fr 1fr}.matrix-metrics>div:nth-child(even){border-right:0}.matrix-metrics>div:nth-child(3){border-right:1px solid var(--border)}.fingerprint-inline{max-width:200px}}
