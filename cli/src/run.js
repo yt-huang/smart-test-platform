@@ -6,7 +6,8 @@ import { ConfigurationError } from './errors.js';
 export { ConfigurationError } from './errors.js';
 
 const terminal = new Set(['PASSED', 'FAILED', 'TIMED_OUT', 'CANCELLED']);
-const statuses = new Set(['QUEUED', 'RUNNING', ...terminal]);
+const runStatuses = new Set(['QUEUED', 'ASSIGNED', 'RUNNING', 'CLEANING', ...terminal]);
+const matrixStatuses = new Set(['QUEUED', 'RUNNING', 'PASSED', 'FAILED', 'CANCELLED']);
 const browsers = new Set(['chromium', 'firefox', 'webkit']);
 const sharedOptions = { '--plan': 'plan', '--junit': 'junit', '--timeout': 'timeout', '--poll-interval': 'pollInterval', '--name': 'name', '--commit': 'commit' };
 const help = 'platform run (--suite smoke|regression [--platform web|android|ios] [--browser chromium|firefox|webkit] | --plan ID) [--junit FILE] [--timeout SECONDS] [--poll-interval MS] [--name TEXT] [--commit SHA]\nplatform matrix --plan ID --browsers chromium,firefox[,webkit] [--junit FILE] [--timeout SECONDS] [--poll-interval MS] [--name TEXT] [--commit SHA]\nEnvironment: PLATFORM_URL, PLATFORM_TOKEN. Exit: 0 passed, 1 failed/timed out/cancelled, 2 configuration or API error.';
@@ -45,6 +46,7 @@ export function parseArgs(argv) {
 }
 
 function validateExecution(execution, command, options, expectedId) {
+  const statuses = command === 'matrix' ? matrixStatuses : runStatuses;
   if (!execution || typeof execution.id !== 'string' || !execution.id.trim() || !statuses.has(execution.status) || (expectedId && execution.id !== expectedId)) {
     throw new ConfigurationError(`Platform did not return a valid ${command} ID/status`);
   }
@@ -55,7 +57,7 @@ function validateExecution(execution, command, options, expectedId) {
   if (!Array.isArray(execution.variants) || execution.variants.length !== options.browsers.length) throw new ConfigurationError('Platform returned invalid matrix targets');
   const labels = new Set(), runIds = new Set();
   for (const variant of execution.variants) {
-    if (!variant || !options.browsers.includes(variant.label) || labels.has(variant.label) || typeof variant.runId !== 'string' || !variant.runId.trim() || runIds.has(variant.runId) || !statuses.has(variant.status) || !validSummary(variant.summary)) {
+    if (!variant || !options.browsers.includes(variant.label) || labels.has(variant.label) || typeof variant.runId !== 'string' || !variant.runId.trim() || runIds.has(variant.runId) || !runStatuses.has(variant.status) || !validSummary(variant.summary)) {
       throw new ConfigurationError('Platform returned invalid matrix targets');
     }
     labels.add(variant.label);

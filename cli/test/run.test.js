@@ -34,6 +34,18 @@ test('failure, timeout and cancellation return exit one for plan runs', async ()
     assert.equal(await runCommand(['run', '--plan', 'p1'], env, { out: () => {}, err: () => {}, fetchImpl: async () => json({ id: 'r1', status }) }), 1);
   }
 });
+test('existing run accepts assigned and cleaning states before reaching a passed terminal state', async () => {
+  const outputs = [];
+  const states = ['ASSIGNED', 'RUNNING', 'CLEANING', 'PASSED'];
+  const code = await runCommand(['run', '--plan', 'p1'], env, {
+    out: value => outputs.push(value), err: value => assert.fail(value), sleep: async () => {},
+    fetchImpl: async () => json({ id: 'r1', status: states.shift(), summary: { total: 1, passed: states.length === 0 ? 1 : 0, failed: 0 } })
+  });
+  assert.equal(code, 0);
+  assert.equal(states.length, 0);
+  assert.ok(outputs.includes('Run r1: ASSIGNED'));
+  assert.ok(outputs.includes('Run r1: CLEANING'));
+});
 test('missing auth, API rejection and empty or mixed suites return configuration exit two', async () => {
   const silent = { out: () => {}, err: () => {} };
   assert.equal(await runCommand(['run', '--plan', 'p1'], {}, silent), 2);

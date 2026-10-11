@@ -98,6 +98,27 @@ test('mixed failures, target timeout and cancellation return exit one and keep i
   }
 });
 
+test('matrix follows assigned targets through running and cleaning before terminal export', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'platform-matrix-cli-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const outputs = [], calls = [];
+  const states = [matrix('RUNNING', ['ASSIGNED', 'ASSIGNED']), matrix('RUNNING', ['CLEANING', 'RUNNING']), matrix('RUNNING', ['PASSED', 'CLEANING']), matrix('PASSED')];
+  const target = path.join(directory, 'assigned.xml');
+  const code = await runCommand(['matrix', '--plan', 'p1', '--browsers', 'chromium,firefox', '--junit', target], env, {
+    ...silent, out: value => outputs.push(value), sleep: async () => {}, fetchImpl: async url => {
+      calls.push(url);
+      if (url.endsWith('/junit')) { assert.equal(states.length, 0); return new Response('<testsuites tests="2" failures="0"/>'); }
+      return json(states.shift());
+    }
+  });
+  assert.equal(code, 0);
+  assert.equal(calls.length, 5);
+  assert.ok(outputs.some(value => value.startsWith('chromium: ASSIGNED')));
+  assert.ok(outputs.some(value => value.startsWith('chromium: CLEANING')));
+  assert.ok(outputs.some(value => value.startsWith('firefox: CLEANING')));
+  assert.match(await readFile(target, 'utf8'), /tests="2"/);
+});
+
 test('waiting timeout preserves report and target progress, never cancels or exports an active matrix', async () => {
   let time = 0; const calls = [], outputs = [], errors = [];
   const code = await runCommand(['matrix', '--plan', 'p1', '--browsers', 'chromium,firefox', '--timeout', '1', '--junit', 'unused.xml'], env, {
