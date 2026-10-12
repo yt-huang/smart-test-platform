@@ -37,9 +37,9 @@ export async function api(path, options = {}) {
   return contentType.includes('application/json') ? response.json() : response.text();
 }
 
-export async function authenticatedBlob(url) {
+export async function authenticatedBlob(url, signal) {
   const target = resolveEvidenceUrl(url, apiOrigin, window.location.origin);
-  const response = await fetch(target, { headers: { Authorization: `Bearer ${getToken()}` } });
+  const response = await fetch(target, { headers: { Authorization: `Bearer ${getToken()}` }, signal });
   if (!response.ok) return handleFailure(response);
   return response.blob();
 }
