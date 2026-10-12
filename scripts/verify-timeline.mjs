@@ -50,7 +50,7 @@ async function inspect(run) {
   }
   const failed = run.results.find(r => r.status === 'FAILED');
   const step = failed.steps.find(s => s.status === 'FAILED'); assert.ok(step?.timing); assert.match(failed.error, /expected/);
-  assert.ok(run.logs.some(line => typeof line === 'string' && /^\d{4}-\d\d-\d\dT.*Z Timeline/.test(line)), 'Actual page console logs have source timestamps');
+  assert.ok(run.logs.some(line => typeof line === 'string' && /^\d{4}-\d\d-\d\dT.*Z console\.log: Timeline/.test(line)), 'Actual page console logs have source timestamps');
   const video = failed.evidence.find(e => e.capture.kind === 'video');
   assert.ok(Date.parse(video.capture.startedAt) <= Date.parse(step.timing.finishedAt));
   assert.ok(Date.parse(step.timing.finishedAt) <= Date.parse(video.capture.finishedAt));
