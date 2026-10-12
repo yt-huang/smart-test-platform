@@ -56,6 +56,8 @@ jobs:
         run: node scripts/verify-matrix.mjs
       - name: Verify quarantine-aware gate with actual failing browser assertions
         run: node scripts/verify-gate.mjs
+      - name: Verify actual evidence timeline timestamps and media
+        run: node scripts/verify-timeline.mjs
       - name: Check live reports and evidence integrity
         run: |
           node scripts/verify-persistence.mjs baseline --snapshot /tmp/platform-persistence.json
