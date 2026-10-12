@@ -1,13 +1,36 @@
 // 时间轴纯函数。所有时刻必须来自真实采集元数据（timing/capture/日志 ISO 前缀），
 // 缺失或无效一律返回 null，绝不由 createdAt/duration 推断同步位置。
 
-const ISO_STAMP = '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})';
-const ISO_ANCHORED = new RegExp(`^${ISO_STAMP}$`);
-const ISO_PREFIX = new RegExp(`^(${ISO_STAMP})(?:\\s|$)`);
+// 捕获组分组的 ISO 形状：Date.parse 会把不存在的日期（如 2 月 30 日）静默归一化，
+// 所以形状匹配后仍须按日历/时刻/offset 数值范围严格校验。
+const ISO_PARTS = '(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})(?:\\.\\d+)?(Z|[+-]\\d{2}:?\\d{2})';
+const ISO_ANCHORED = new RegExp(`^${ISO_PARTS}$`);
+const ISO_PREFIX = new RegExp(`^(${ISO_PARTS})(?:\\s|$)`);
+const OFFSET_PARTS = /^([+-])(\d{2}):?(\d{2})$/;
 export const CAPTURE_KINDS = ['screenshot', 'video', 'trace', 'log'];
 
+function daysInMonth(year, month) {
+  if (month === 2) return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0 ? 29 : 28;
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
 export function parseIso(value) {
-  if (typeof value !== 'string' || !ISO_ANCHORED.test(value)) return null;
+  if (typeof value !== 'string') return null;
+  const m = value.match(ISO_ANCHORED);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const hour = Number(m[4]);
+  const minute = Number(m[5]);
+  const second = Number(m[6]);
+  if (month < 1 || month > 12) return null;
+  if (day < 1 || day > daysInMonth(year, month)) return null;
+  if (hour > 23 || minute > 59 || second > 59) return null;
+  if (m[7] !== 'Z') {
+    const offset = m[7].match(OFFSET_PARTS);
+    if (!offset || Number(offset[2]) > 23 || Number(offset[3]) > 59) return null;
+  }
   const ms = Date.parse(value);
   return Number.isNaN(ms) ? null : ms;
 }
@@ -60,6 +83,14 @@ export function evidenceKind(evidence) {
   return 'file';
 }
 
+// 截图解码失败提示与复位规则：fetch 200 但 PNG 损坏时 img 触发 error，须给出明确可重试提示；
+// 错误按其所属 Object URL 记录，换图或重试拿到新 URL 时旧错误自动失效，不得滞留覆盖新截图。
+export const SCREENSHOT_DECODE_ERROR_MESSAGE = '截图已加载但无法解码显示，可能文件损坏，可重试或下载查看。';
+export function screenshotDecodeState(objectUrl, error) {
+  if (!objectUrl) return '';
+  return error && error.url === objectUrl ? error.message : '';
+}
+
 // 事件时刻定位到录像秒数，metadata.duration 为上界；首帧延迟决定这只是近似位置。
 export function clampSeek(eventMs, captureStartMs, durationSec) {
   if (eventMs === null || eventMs === undefined || captureStartMs === null || captureStartMs === undefined) return null;
@@ -82,13 +113,14 @@ export function nearestScreenshot(items, timeMs) {
   return best;
 }
 
-// 日志：字符串按严格 ISO 前缀解析，对象取 timestamp/createdAt；无窗口时保留全部可定位行。
+// 日志：字符串按严格 ISO 前缀解析，对象只取 timestamp；createdAt 等上传属性不作为源时间。
+// 没有有效用例窗口时不生成任何 case 日志事件（共享 run 日志无法证明属于所选用例）。
 export function logEntryTime(entry) {
   if (typeof entry === 'string') {
     const match = entry.match(ISO_PREFIX);
     return match ? parseIso(match[1]) : null;
   }
-  if (entry && typeof entry === 'object') return parseIso(entry.timestamp) ?? parseIso(entry.createdAt);
+  if (entry && typeof entry === 'object') return parseIso(entry.timestamp);
   return null;
 }
 
@@ -107,7 +139,7 @@ export function logsInWindow(logs, window) {
   for (const entry of logs || []) {
     const time = logEntryTime(entry);
     if (time === null) { unpositioned++; continue; }
-    if (window && (time < window.start || time > window.end)) continue;
+    if (!window || time < window.start || time > window.end) continue;
     lines.push({ time, text: logEntryText(entry) });
   }
   lines.sort((a, b) => a.time - b.time);
@@ -134,11 +166,13 @@ export function defaultFocusTime(result) {
   return null;
 }
 
+// 只有 case/step timing 或 evidence capture 这类可关联采集时间才算已有同步数据；
+// 仅有可解析 ISO 前缀的共享日志（却无 case/step/capture 关联时间）的历史报告不算，
+// 否则会把别用例/别来源的日志误当作时间轴事件。
 export function hasTimelineData(run) {
   const results = run?.results || [];
   if (results.some(r => caseWindow(r) || (r.steps || []).some(s => stepTiming(s)))) return true;
-  if (results.some(r => (r.evidence || []).some(e => evidenceCapture(e)))) return true;
-  return (run?.logs || []).some(entry => logEntryTime(entry) !== null);
+  return results.some(r => (r.evidence || []).some(e => evidenceCapture(e)));
 }
 
 export function clockTime(ms) {

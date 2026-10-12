@@ -4,6 +4,7 @@ import {
   approxSecondsLabel, caseWindow, clampSeek, defaultCaseId, defaultFocusTime,
   evidenceCapture, evidenceKind, hasTimelineData, logEntryTime, logsInWindow,
   nearestScreenshot, normalizeTiming, parseIso, relativeLabel,
+  screenshotDecodeState, SCREENSHOT_DECODE_ERROR_MESSAGE,
 } from './timelineUtils.js';
 
 const TIMED_CASE = {
@@ -18,11 +19,29 @@ const TIMED_CASE = {
 test('parseIso only accepts anchored ISO stamps with zone offset', () => {
   assert.equal(parseIso('2026-10-12T00:00:01.000Z'), Date.parse('2026-10-12T00:00:01.000Z'));
   assert.equal(parseIso('2026-10-12T08:00:01+08:00'), Date.parse('2026-10-12T08:00:01+08:00'));
+  assert.equal(parseIso('2026-10-12T08:00:01+0800'), Date.parse('2026-10-12T08:00:01+0800'));
   assert.equal(parseIso('2026-10-12 00:00:01Z'), null);
   assert.equal(parseIso('2026-10-12T00:00:01'), null);
-  assert.equal(parseIso('2026-13-12T00:00:01Z'), null);
   assert.equal(parseIso('nope'), null);
   assert.equal(parseIso(123), null);
+});
+
+test('parseIso strictly validates calendar, clock time and offset instead of Date.parse normalization', () => {
+  // Date.parse 会把这些不存在的日期静默归一化，严格校验必须拒绝。
+  assert.equal(parseIso('2026-02-30T00:00:00.000Z'), null);
+  assert.equal(parseIso('2026-02-29T00:00:00.000Z'), null); // 2026 非闰年
+  assert.equal(parseIso('2028-02-29T00:00:00.000Z'), Date.parse('2028-02-29T00:00:00.000Z')); // 闰年合法
+  assert.equal(parseIso('2026-04-31T00:00:00.000Z'), null); // 4 月无 31 日
+  assert.equal(parseIso('2026-00-12T00:00:00.000Z'), null);
+  assert.equal(parseIso('2026-13-12T00:00:01Z'), null);
+  assert.equal(parseIso('2026-10-00T00:00:01Z'), null);
+  assert.equal(parseIso('2026-10-32T00:00:01Z'), null);
+  assert.equal(parseIso('2026-10-12T24:00:01Z'), null);
+  assert.equal(parseIso('2026-10-12T00:60:01Z'), null);
+  assert.equal(parseIso('2026-10-12T00:00:60Z'), null);
+  assert.equal(parseIso('2026-10-12T00:00:01+24:00'), null);
+  assert.equal(parseIso('2026-10-12T00:00:01+08:60'), null);
+  assert.equal(parseIso('2026-10-12T00:00:01+2360'), null);
 });
 
 test('normalizeTiming keeps paired ordered stamps and rejects reversed or partial pairs', () => {
@@ -95,9 +114,27 @@ test('logsInWindow parses strict ISO prefixes, filters to the case window and co
   const { lines, unpositioned } = logsInWindow(logs, { start: Date.parse('2026-10-12T00:00:10.000Z'), end: Date.parse('2026-10-12T00:00:20.000Z') });
   assert.deepEqual(lines.map(l => l.text.trim()), ['page loaded', 'object log', 'assertion failed']);
   assert.equal(unpositioned, 1);
-  const all = logsInWindow(logs, null);
-  assert.equal(all.lines.length, 4);
   assert.equal(logEntryTime('2026-10-12 00:00:10Z not iso'), null);
+});
+
+test('logsInWindow without a valid case window generates no case log events', () => {
+  // 共享 run 日志无法证明属于所选用例：无窗口时即便有可解析 ISO 时间也不生成事件。
+  const none = logsInWindow(['2026-10-12T00:00:01.000Z other case synthetic log'], null);
+  assert.equal(none.lines.length, 0);
+  assert.equal(none.unpositioned, 0);
+  const mixed = logsInWindow(['2026-10-12T00:00:01.000Z other case log', 'plain line'], null);
+  assert.equal(mixed.lines.length, 0);
+  assert.equal(mixed.unpositioned, 1);
+});
+
+test('logEntryTime rejects calendar-invalid prefixes and createdAt upload attributes', () => {
+  // Date.parse 会归一化 2 月 30 日，严格校验必须视为不可定位。
+  assert.equal(logEntryTime('2026-02-30T00:00:00.000Z synthetic impossible date'), null);
+  assert.equal(logEntryTime('2026-13-12T00:00:00.000Z bad month'), null);
+  // 对象日志只认 timestamp；createdAt 是上传属性，不作为源时间。
+  assert.equal(logEntryTime({ createdAt: '2026-10-12T00:00:01.000Z', message: 'upload attr only' }), null);
+  assert.equal(logEntryTime({ timestamp: '2026-10-12T00:00:01.000Z', message: 'ok' }), Date.parse('2026-10-12T00:00:01.000Z'));
+  assert.equal(logEntryTime(null), null);
 });
 
 test('defaultCaseId prefers the first failure, then the first timed case', () => {
@@ -116,12 +153,38 @@ test('defaultFocusTime uses the first failed step finishedAt and nothing else', 
   assert.equal(defaultFocusTime({}), null);
 });
 
-test('hasTimelineData is false for legacy reports without any real timestamps', () => {
+test('hasTimelineData is false for legacy reports without correlatable capture times', () => {
   assert.equal(hasTimelineData({ results: [{ caseId: 'c', durationMs: 100 }], logs: ['plain log line'] }), false);
   assert.equal(hasTimelineData({ results: [TIMED_CASE] }), true);
   assert.equal(hasTimelineData({ results: [{ caseId: 'c', evidence: [{ capture: { kind: 'screenshot', startedAt: '2026-10-12T00:00:01Z', finishedAt: '2026-10-12T00:00:02Z' } }] }] }), true);
-  assert.equal(hasTimelineData({ logs: ['2026-10-12T00:00:01Z hello'] }), true);
   assert.equal(hasTimelineData({}), false);
+});
+
+test('hasTimelineData ignores ISO-only logs and createdAt upload attributes in legacy history', () => {
+  // 旧报告只有可解析 ISO 的共享日志与 createdAt 等上传属性，缺 case/step/capture 关联时间，
+  // 不能当作已有同步数据，否则时间轴会被误选并展示别来源的日志事件。
+  const legacy = {
+    createdAt: '2026-10-12T00:00:00.000Z',
+    results: [{
+      caseId: 'c', status: 'PASSED', durationMs: 1000,
+      createdAt: '2026-10-12T00:00:00.500Z',
+      evidence: [{ contentType: 'image/png', createdAt: '2026-10-12T00:00:01.000Z', url: '/api/evidence/1' }],
+    }],
+    logs: ['2026-10-12T00:00:01.000Z plain iso log', { createdAt: '2026-10-12T00:00:02.000Z', message: 'upload attr log' }],
+  };
+  assert.equal(hasTimelineData(legacy), false);
+  // 一旦存在真实 step timing，即便其余字段是 legacy 上传属性也仍算有同步数据。
+  assert.equal(hasTimelineData({ ...legacy, results: [{ ...legacy.results[0], steps: TIMED_CASE.steps }] }), true);
+});
+
+test('screenshotDecodeState reports decode failure only for the current object URL and resets on change', () => {
+  const errA = { url: 'blob:a', message: SCREENSHOT_DECODE_ERROR_MESSAGE };
+  // 正常解码无错误；fetch 200 但 PNG 损坏时对当前 URL 给出可重试提示。
+  assert.equal(screenshotDecodeState('blob:a', null), '');
+  assert.equal(screenshotDecodeState('blob:a', errA), SCREENSHOT_DECODE_ERROR_MESSAGE);
+  // 换图（新 Object URL）或重试后旧错误必须失效，不能滞留覆盖新截图；无当前图时不显示。
+  assert.equal(screenshotDecodeState('blob:b', errA), '');
+  assert.equal(screenshotDecodeState('', errA), '');
 });
 
 test('labels render relative offsets and approximate positions without claiming frame accuracy', () => {

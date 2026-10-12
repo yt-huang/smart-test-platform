@@ -5,7 +5,8 @@ import { Badge, Button, Empty, ErrorNotice, Loading } from './components.jsx';
 import { duration } from './utils.js';
 import {
   approxSecondsLabel, caseWindow, clampSeek, clockTime, defaultCaseId, defaultFocusTime,
-  evidenceCapture, evidenceKind, hasTimelineData, logsInWindow, nearestScreenshot, relativeLabel, stepTiming,
+  evidenceCapture, evidenceKind, hasTimelineData, logsInWindow, nearestScreenshot, relativeLabel,
+  screenshotDecodeState, SCREENSHOT_DECODE_ERROR_MESSAGE, stepTiming,
 } from './timelineUtils.js';
 
 // 取真实 Blob 并管理 Object URL：切换 case/unmount 时中止未完成请求并释放旧 URL，避免旧媒体覆盖当前用例。
@@ -111,7 +112,11 @@ function StepTrack({ result, focus, windowStart, onFocus }) {
 function ScreenshotTrack({ shots, focus, windowStart, onFocus }) {
   const nearest = nearestScreenshot(shots, focus);
   const current = useObjectUrl(nearest?.url);
+  // 解码错误按其 Object URL 记录：换图/重试拿到新 URL 时旧错误自动失效（见 screenshotDecodeState）。
+  const [decodeError, setDecodeError] = useState(null);
+  const decodeMessage = screenshotDecodeState(current.objectUrl, decodeError);
   const distance = nearest && focus != null ? (focus < nearest.capture.start ? nearest.capture.start - focus : focus > nearest.capture.end ? focus - nearest.capture.end : 0) : null;
+  const mediaError = current.error || decodeMessage;
   return <section className="timeline-track">
     <header><Camera size={15} />截图<span>{shots.length ? `${shots.length} 张` : '无'}</span></header>
     {shots.length ? <ul className="timeline-track-list">{shots.map((shot, i) => <li key={shot.id || shot.url || i}>
@@ -122,10 +127,10 @@ function ScreenshotTrack({ shots, focus, windowStart, onFocus }) {
     </li>)}</ul> : <p className="timeline-note">该用例没有带采集时间的截图证据。</p>}
     <div className="timeline-media">
       {current.loading && <div className="timeline-media-status"><Loading label="正在加载截图…" /></div>}
-      {current.error && <div className="timeline-media-status"><ErrorNotice compact message={current.error} onRetry={current.retry} /></div>}
-      {!current.loading && !current.error && !current.objectUrl && <div className="timeline-media-status">点击步骤或截图事件后，这里显示对应时刻最接近的真实截图。</div>}
-      {current.objectUrl && nearest && <figure>
-        <a href={current.objectUrl} target="_blank" rel="noreferrer"><img src={current.objectUrl} alt={`截图 ${nearest.name || '证据'}`} /></a>
+      {!current.loading && mediaError && <div className="timeline-media-status"><ErrorNotice compact message={mediaError} onRetry={current.retry} /></div>}
+      {!current.loading && !mediaError && !current.objectUrl && <div className="timeline-media-status">点击步骤或截图事件后，这里显示对应时刻最接近的真实截图。</div>}
+      {current.objectUrl && nearest && !decodeMessage && <figure>
+        <a href={current.objectUrl} target="_blank" rel="noreferrer"><img src={current.objectUrl} alt={`截图 ${nearest.name || '证据'}`} onError={() => setDecodeError({ url: current.objectUrl, message: SCREENSHOT_DECODE_ERROR_MESSAGE })} /></a>
         <figcaption>{nearest.name || '截图'} · 采集于 {clockTime(nearest.capture.start)}{distance != null && distance > 0 ? ` · 距焦点 ${relativeLabel(distance)}` : ' · 包含焦点时刻'}</figcaption>
       </figure>}
     </div>
