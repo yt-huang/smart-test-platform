@@ -91,6 +91,15 @@ export function screenshotDecodeState(objectUrl, error) {
   return error && error.url === objectUrl ? error.message : '';
 }
 
+// 录像解码失败提示与复位规则：fetch 200 但 WebM 损坏时 video 触发 error，须给出明确可重试提示；
+// 错误按其所属 Object URL 记录——重试/换来源拿到新 URL 时旧错误自动失效，
+// 不得滞留拦截有效新录像的挂载（旧实现 error 为裸字符串，重试后 video 永不重新挂载）。
+export const VIDEO_DECODE_ERROR_MESSAGE = '录像已加载但无法解码播放，可能文件损坏，可重试或下载查看。';
+export function videoDecodeState(objectUrl, error) {
+  if (!objectUrl) return '';
+  return error && error.url === objectUrl ? error.message : '';
+}
+
 // 事件时刻定位到录像秒数，metadata.duration 为上界；首帧延迟决定这只是近似位置。
 export function clampSeek(eventMs, captureStartMs, durationSec) {
   if (eventMs === null || eventMs === undefined || captureStartMs === null || captureStartMs === undefined) return null;

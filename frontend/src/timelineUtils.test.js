@@ -4,7 +4,7 @@ import {
   approxSecondsLabel, caseWindow, clampSeek, defaultCaseId, defaultFocusTime,
   evidenceCapture, evidenceKind, hasTimelineData, logEntryTime, logsInWindow,
   nearestScreenshot, normalizeTiming, parseIso, relativeLabel,
-  screenshotDecodeState, SCREENSHOT_DECODE_ERROR_MESSAGE,
+  screenshotDecodeState, SCREENSHOT_DECODE_ERROR_MESSAGE, VIDEO_DECODE_ERROR_MESSAGE, videoDecodeState,
 } from './timelineUtils.js';
 
 const TIMED_CASE = {
@@ -185,6 +185,16 @@ test('screenshotDecodeState reports decode failure only for the current object U
   // 换图（新 Object URL）或重试后旧错误必须失效，不能滞留覆盖新截图；无当前图时不显示。
   assert.equal(screenshotDecodeState('blob:b', errA), '');
   assert.equal(screenshotDecodeState('', errA), '');
+});
+
+test('videoDecodeState reports decode failure only for the current object URL and resets on change', () => {
+  const errA = { url: 'blob:a', message: VIDEO_DECODE_ERROR_MESSAGE };
+  // fetch 200 但 WebM 损坏：仅对当前 URL 报可重试提示；重试/换来源拿到新 URL 后旧错误必须失效，
+  // 否则 !decodeMessage 条件会让有效新录像永远不挂载（真实门禁复核发现的恢复死锁）。
+  assert.equal(videoDecodeState('blob:a', null), '');
+  assert.equal(videoDecodeState('blob:a', errA), VIDEO_DECODE_ERROR_MESSAGE);
+  assert.equal(videoDecodeState('blob:b', errA), '');
+  assert.equal(videoDecodeState('', errA), '');
 });
 
 test('labels render relative offsets and approximate positions without claiming frame accuracy', () => {

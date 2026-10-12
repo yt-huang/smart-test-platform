@@ -7,6 +7,7 @@ import {
   approxSecondsLabel, caseWindow, clampSeek, clockTime, defaultCaseId, defaultFocusTime,
   evidenceCapture, evidenceKind, hasTimelineData, logsInWindow, nearestScreenshot, relativeLabel,
   screenshotDecodeState, SCREENSHOT_DECODE_ERROR_MESSAGE, stepTiming,
+  VIDEO_DECODE_ERROR_MESSAGE, videoDecodeState,
 } from './timelineUtils.js';
 
 // 取真实 Blob 并管理 Object URL：切换 case/unmount 时中止未完成请求并释放旧 URL，避免旧媒体覆盖当前用例。
@@ -143,7 +144,7 @@ function VideoTrack({ videos, focus }) {
   const { objectUrl, loading, error, retry } = useObjectUrl(primary?.url);
   const videoRef = useRef(null);
   const [meta, setMeta] = useState(null);
-  const [decodeError, setDecodeError] = useState('');
+  const [decodeError, setDecodeError] = useState(null);
   const [seekHint, setSeekHint] = useState(null);
   const captureStart = capture?.start ?? null;
   useEffect(() => {
@@ -152,15 +153,19 @@ function VideoTrack({ videos, focus }) {
     if (target == null) return;
     try { videoRef.current.currentTime = target; videoRef.current.pause(); setSeekHint(target); } catch { setSeekHint(null); }
   }, [focus, captureStart, meta]);
-  const mediaError = error || decodeError;
+  // 解码错误按 Object URL 记录：重试/换来源拿到新 URL 时旧错误自动失效，不拦截新录像挂载。
+  const decodeMessage = videoDecodeState(objectUrl, decodeError);
+  const mediaError = error || decodeMessage;
+  // 重试同时清掉旧 metadata/seek 结果：它们描述的是旧 Blob，不能滞留污染新录像。
+  const handleRetry = () => { setDecodeError(null); setMeta(null); setSeekHint(null); retry(); };
   return <section className="timeline-track">
     <header><Film size={15} />录像<span>{videos.length ? `${videos.length} 段` : '无'}{meta ? ` · ${duration(meta.duration * 1000)}` : ''}</span></header>
     {!primary && <p className="timeline-note">该用例没有带采集时间的录像证据。</p>}
     {videos.length > 1 && <p className="timeline-note">该用例有多段录像，此处播放第一段；其余请在「执行证据」查看。</p>}
     {primary && <div className="timeline-media">
       {loading && <div className="timeline-media-status"><Loading label="正在加载录像…" /></div>}
-      {mediaError && !loading && <div className="timeline-media-status"><ErrorNotice compact message={mediaError} onRetry={retry} /></div>}
-      {objectUrl && !loading && !decodeError && <video ref={videoRef} controls src={objectUrl} onLoadedMetadata={e => { setMeta({ duration: e.currentTarget.duration }); setDecodeError(''); }} onError={() => setDecodeError('录像已加载但无法解码播放，可能文件损坏，可重试或下载查看。')} />}
+      {mediaError && !loading && <div className="timeline-media-status"><ErrorNotice compact message={mediaError} onRetry={handleRetry} /></div>}
+      {objectUrl && !loading && !decodeMessage && <video ref={videoRef} controls src={objectUrl} onLoadedMetadata={e => { setMeta({ duration: e.currentTarget.duration }); setDecodeError(null); }} onError={() => setDecodeError({ url: objectUrl, message: VIDEO_DECODE_ERROR_MESSAGE })} />}
     </div>}
     {primary && capture && <p className="timeline-note">录像起点为录制启动时刻（非精确首帧，首帧延迟影响定位精度）；seek 上界取媒体 metadata.duration。{seekHint != null && <strong>已定位到 {approxSecondsLabel(seekHint)}（近似位置）。</strong>}</p>}
   </section>;
