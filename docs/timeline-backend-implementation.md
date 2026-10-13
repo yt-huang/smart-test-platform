@@ -9,7 +9,7 @@ Status: **implemented**. Independent acceptance, integrated runtime checks, Post
 - Branch: `codex/timeline-backend`.
 - Input commit: `921b5d0fa5ae5b26d210d8c5e2ed87ebb1792575`.
 - Implementation commit: `8ed21963da97a39419b0f20a756af7d40cfc5594`.
-- Contract: `openspec/changes/add-evidence-timeline/design.md`, Contract v1, and `specs/evidence-timeline/spec.md` at the input commit.
+- Contract: `openspec/changes/archive/2026-10-13-add-evidence-timeline/design.md`, Contract v1, and `specs/evidence-timeline/spec.md` at the input commit.
 - Write ownership: `backend/src/main/java`, `backend/src/test/java`, and this report. Agent, frontend, CLI, specification, and other execution reports were not modified.
 
 ## Implemented behavior

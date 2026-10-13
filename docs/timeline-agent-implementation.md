@@ -6,7 +6,7 @@
 
 - 执行者：Codex 原生子 Agent `/root/timeline_agent`，通过 `collaboration.spawn_agent` 分派，实际实现/检查使用 `functions.exec`、`exec_command` 和 `apply_patch`。
 - Provider：Codex/OpenAI 原生执行环境；当前工具未暴露具体模型别名，记录为未知，不使用模型自述替代配置元数据。本任务未调用 Kimi，前端 Kimi 分工由主控协调。
-- 输入 SHA：`921b5d0fa5ae5b26d210d8c5e2ed87ebb1792575`；接口：`openspec/changes/add-evidence-timeline/design.md` Contract v1 及对应 delta spec。
+- 输入 SHA：`921b5d0fa5ae5b26d210d8c5e2ed87ebb1792575`；接口：`openspec/changes/archive/2026-10-13-add-evidence-timeline/design.md` Contract v1 及对应 delta spec。
 - 绝对工作目录：`C:/Users/admin/.codex/worktrees/platform-runtime/ai-test`；分支：`codex/timeline-agent`，开始时工作树干净。
 - 允许修改：`agent/` 与本报告。实际修改 browser executor、client、platform 与两份 Agent 测试；未修改 backend/frontend/CLI/规格或 Android adapter。
 - 实际运行环境：Windows PowerShell，Node `v22.11.0`、npm `10.9.0`，已有依赖与 Playwright Chromium 配置直接复用。

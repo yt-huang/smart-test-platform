@@ -84,6 +84,12 @@ node cli/src/index.js matrix --plan PLAN_ID --browsers chromium,firefox --gate -
 
 以上命令需已设置 `PLATFORM_URL` 与 `PLATFORM_TOKEN`。门禁记录见 [交付记录](docs/gate-delivery.md)。工单与告警通知尚待实际接入。
 
+## 证据时间轴
+
+执行报告按真实采集时间关联步骤、截图、录像与日志，默认定位首个失败点。点击步骤或截图会暂停并近似定位录像；首帧延迟使其不保证逐帧同步。无时间的历史证据保留原下载入口，不从上传时间回填。媒体失败可重试，VIEWER可回放。
+
+实际Chromium/Firefox执行、独立回放验收与云端重启记录见 [时间轴交付](docs/timeline-delivery.md)。
+
 ## 验收
 
 ```bash
@@ -101,6 +107,8 @@ node scripts/verify-e2e.mjs
 node scripts/verify-matrix.mjs
 # 用同一审批用例真实触发隔离、警告门禁与人工释放
 node scripts/verify-gate.mjs
+# 由实际Agent采集四轨源时间与媒体
+node scripts/verify-timeline.mjs
 ```
 
 验收包含真实浏览器成功/失败执行、草稿审核门禁、证据鉴权、报告导出、超时、取消、RBAC 和资源清理。GitHub Actions 自动执行相同闭环。

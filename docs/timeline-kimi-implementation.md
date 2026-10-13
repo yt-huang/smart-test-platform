@@ -3,7 +3,7 @@
 ## 身份与输入
 
 - 执行者：真实 Kimi Code CLI 0.29.0，alias/provider `kimi-code/kimi-for-coding`（managed:kimi-code，host api.kimi.com，model kimi-for-coding）。
-- 输入：`921b5d0fa5ae5b26d210d8c5e2ed87ebb1792575`，contract v1（`openspec/changes/add-evidence-timeline/design.md`）。
+- 输入：`921b5d0fa5ae5b26d210d8c5e2ed87ebb1792575`，contract v1（`openspec/changes/archive/2026-10-13-add-evidence-timeline/design.md`）。
 - 工作目录：`C:/Users/admin/.codex/worktrees/platform-frontend/ai-test`，分支 `codex/timeline-portal`。
 - 写入范围：仅 `frontend/` 与本文档；未写 backend/agent/规格/其他报告。Codex 后端与 runtime 在独立 worktree 并行实现 timing/capture 采集与归档。
 - 追加修复轮次（本 commit）：基线 `1bb354e`，仅改 `frontend/src/timeline.jsx`、`frontend/src/timelineUtils.js`、`frontend/src/timelineUtils.test.js` 与本文档；修复上述独立 Codex 真实 Portal 复核发现的 VideoTrack 重试恢复死锁，浏览器恢复复核交由独立 Agent 复测。
@@ -16,12 +16,12 @@
 - `frontend/src/api.js`：`authenticatedBlob(url, signal)` 增加可选 AbortSignal，向后兼容。
 - `frontend/src/styles.css`：追加 timeline 样式块；轨道 grid `minmax(250px,1fr)` + ≤540px 单列、`max-width:100%` 媒体、日志/文本 `overflow-wrap:anywhere`，390px 无页面横溢。
 - `frontend/package.json`：test 脚本纳入 `timelineUtils.test.js`。
-- `frontend/src/timelineUtils.test.js`（新增）：19 个用例覆盖严格 ISO（含 2 月 30 日/非闰年 2 月 29 日/越界月日时分秒/越界 offset 等日历归一化负例与闰年、+0800 正例）、逆序/缺失拒绝、capture 白名单与 JSON 字符串、clampSeek 三界、最近截图选择、日志窗口过滤与未定位计数、无窗口不生成日志事件、`logEntryTime` 拒绝日历无效前缀与 createdAt 上传属性、`hasTimelineData` 拒绝仅 ISO 日志+createdAt 的 legacy 历史、截图/录像解码错误随 Object URL 复位、默认 case/失败点选择、标签格式。
+- `frontend/src/timelineUtils.test.js`（新增）：18 个用例覆盖严格 ISO（含 2 月 30 日/非闰年 2 月 29 日/越界月日时分秒/越界 offset 等日历归一化负例与闰年、+0800 正例）、逆序/缺失拒绝、capture 白名单与 JSON 字符串、clampSeek 三界、最近截图选择、日志窗口过滤与未定位计数、无窗口不生成日志事件、`logEntryTime` 拒绝日历无效前缀与 createdAt 上传属性、`hasTimelineData` 拒绝仅 ISO 日志+createdAt 的 legacy 历史、截图/录像解码错误随 Object URL 复位、默认 case/失败点选择、标签格式。
 
 ## 实际执行的检查
 
 - `node --version` → v24.19.0（Node24 已在 PATH）。
-- `npm test`（frontend）→ exit 0，43 pass / 0 fail（含 `timelineUtils.test.js` 19 个用例；首版 13 个用例中 1 个失败为测试夹具自身顺序错误，修正夹具后通过，非实现缺陷）。
+- `npm test`（frontend）→ exit 0，43 pass / 0 fail（含 `timelineUtils.test.js` 18 个用例；首轮曾因测试夹具自身顺序错误失败，修正后总37/37通过，首版新增12个测试，非实现缺陷）。
 - `npm run build`（frontend，vite 6.4.4）→ exit 0，1596 modules transformed，`dist` 产物正常。
 - 未运行 `npm ci`（node_modules 已就绪，依赖无变更）。
 - 独立 Codex 源码 guard 复现（`D:/code/ai-test/.data/timeline-independent/frontend-boundaries.mjs` 只读参考，按其断言内联复现、未写其文件）→ 3/3 PASS：2 月 30 日日历无效日志不生成事件（`logEntryTime` 返回 `null`）；无 case 窗口时共享日志不生成事件（`lines.length` 为 0）；legacy 仅 duration/createdAt 不产生源时间（`hasTimelineData` 为 `false`）。

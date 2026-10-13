@@ -53,4 +53,4 @@ GitHub 完整 CI [38151953533](https://github.com/yt-huang/smart-test-platform/a
 
 8080 保持 private；登录有权限的 GitHub 账号后访问。主控已从 Chrome 登录并看到最终真实矩阵与两个版本指纹，截图保存在 `.data/acceptance/cloud-matrix-final.jpg`。管理员密码在工作区执行 `node scripts/admin-password.mjs` 获取，不写入交付记录。Codespaces 当前空闲 30 分钟自动停止，可从工作区恢复；它不是全天运行的独立生产主机。
 
-WebKit 可选能力由 Agent 实际启动探测决定，本轮执行验收覆盖 Chromium/Firefox，未声称实际跑过 WebKit。随后已实现 [隔离用例 CI 门禁](gate-delivery.md)；证据时间轴、告警升级、真机、投屏和 AI 接入继续按独立功能推进。
+WebKit 可选能力由 Agent 实际启动探测决定，本轮执行验收覆盖 Chromium/Firefox，未声称实际跑过 WebKit。随后已实现 [隔离用例 CI 门禁](gate-delivery.md) 与 [浏览器证据时间轴](timeline-delivery.md)；告警升级、真机、投屏和AI接入继续按独立功能推进。

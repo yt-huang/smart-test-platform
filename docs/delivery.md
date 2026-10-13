@@ -2,7 +2,7 @@
 
 本次从仅有设计文档的 `db60c88` 开始，按项目 `saas-multi-agent` skill 完成中心平台与浏览器执行闭环。交付范围对应 `implement-platform-m1`，原 `build-test-platform-agent-arch` 的全部 M1/M2/M3 尚未整体验收。
 
-本文下列版本与部署数据为首阶段历史记录。当前平台已继续完成 [浏览器矩阵](matrix-delivery.md) 与 [隔离用例门禁](gate-delivery.md)，最新应用版本、CI 和云端验收以这两份后续记录为准。
+本文下列版本与部署数据为首阶段历史记录。当前平台已继续完成 [浏览器矩阵](matrix-delivery.md)、[隔离用例门禁](gate-delivery.md) 与 [证据时间轴](timeline-delivery.md)，最新应用版本、CI和云端验收以时间轴交付记录为准。
 
 ## 实际协作与集成
 

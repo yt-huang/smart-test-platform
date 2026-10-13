@@ -14,7 +14,8 @@ token
 *.pem
 
 # 其他工具目录
-.agents/
+.agents/*
+!.agents/skills/
 .codex/
 
 # Python

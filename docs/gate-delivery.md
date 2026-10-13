@@ -59,4 +59,4 @@
 
 [平台](https://smart-test-platform-7r7vvpp6gqqhp96j-8080.app.github.dev) · [Codespaces工作区](https://smart-test-platform-7r7vvpp6gqqhp96j.github.dev)。8080保持private，用有权限的GitHub账号访问；管理员密码在工作区运行 `node scripts/admin-password.mjs` 查看。工作区空闲30分钟会停止，从工作区恢复后访问。
 
-证据时间轴、设备预约、Android/iOS现场业务验收、投屏、云真机、通知和私有视觉模型/AI仍按原规格后续推进；未启用的能力不展示为已接入。原T15的通知/工单与整体验收保持未勾选。
+随后已完成 [浏览器证据时间轴](timeline-delivery.md)。设备预约、Android/iOS现场业务验收、投屏、云真机、通知和私有视觉模型/AI仍按原规格后续推进；未启用的能力不展示为已接入。原T15的通知/工单与整体验收保持未勾选。

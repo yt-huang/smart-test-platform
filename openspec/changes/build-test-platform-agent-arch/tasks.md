@@ -14,6 +14,8 @@
 
 ## M2 平台完整（对应 PRD M2）
 
+浏览器证据四轨回放已通过独立 `add-evidence-timeline` 变更实施，证据见 `docs/timeline-delivery.md`。T14的真机采集、全设备指纹聚合仍未整体验收，因此保留整项未勾选。
+
 浏览器矩阵子集通过独立 `add-browser-regression-matrix` 变更实施，交付证据见 `docs/matrix-delivery.md`。T13 的设备预约、真机矩阵和 Top 20 验收仍未完成，因此保留整项未勾选。
 
 flaky 的提交快照、真实继续执行、显式 CI 门禁与人工退出通过 `add-quarantine-ci-gate` 变更推进，证据见 `docs/gate-delivery.md`。T15 的工单、3%/14 天告警升级仍未完成，保留整项未勾选。

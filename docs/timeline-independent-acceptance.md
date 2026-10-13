@@ -1,12 +1,14 @@
 # 证据时间轴独立验收
 
-状态：本地 API、真实回放、权限和重启保留已执行；仍有 1 项视频解码后重试恢复问题待原作者修复，尚未完成 verified。
+状态：本地范围 verified。最终修复版已完成独立真实门户验收，录像解码后重试恢复问题已关闭；本地 API、真实回放、权限和重启保留的历史验收记录保留。CI/Codespaces 不计入本报告独立验证范围。
 
 ## 身份与输入
 
-- 独立验收者：Codex 原生子 Agent `/root/timeline_acceptance`；可观测具体模型元数据未提供。
-- 输入提交：`921b5d0fa5ae5b26d210d8c5e2ed87ebb1792575`；绝对工作目录：`D:/code/ai-test`。
-- 依据：`AGENTS.md`、`.agents/skills/saas-multi-agent/SKILL.md`、`references/runtime.md`、`openspec/changes/add-evidence-timeline/design.md` Contract v1 与 delta spec。
+- 初轮独立验收者：Codex 原生子 Agent `/root/timeline_acceptance`；可观测具体模型元数据未提供。
+- 初轮输入提交：`921b5d0fa5ae5b26d210d8c5e2ed87ebb1792575`；绝对工作目录：`D:/code/ai-test`。
+- 最终修复独立验收者：新上下文 Codex 原生子 Agent `/root/timeline_final_acceptance`，非实现作者；可观测具体模型元数据未提供。
+- 最终输入提交：`10714614cbb66251da580333f690b0921e804a09`，应用修复提交 `9ef151173f27980820a391cf070c9b5f88a1ecef`（真实 Kimi 原提交 `7c7d38c`）。主控完成前端静态资源重包和本地 8080 启动后才运行本轮 UI；本验收者未启动、停止或重启服务。
+- 依据：`AGENTS.md`、`.agents/skills/saas-multi-agent/SKILL.md`、`references/runtime.md`、`openspec/changes/archive/2026-10-13-add-evidence-timeline/design.md` Contract v1 与 delta spec。
 - 允许写入：本报告及忽略提交的 `.data/timeline-independent/`；不修改实现、规格或其他报告，不 push，不管理用户/主控 8080 或 Agent 进程。
 - 已读规则、规格、既有验收报告与公开 API/Agent 协议；只读命令退出 0。原应用 `228194f` 未被当作时间轴功能已就绪。
 
@@ -27,7 +29,7 @@
 
 ## 当前限制
 
-实际门户第一修复版 `1bb354e` 已在主控 `3379387` 打包服务中运行。视频解码错误重试恢复待下一版；CI/Codespaces、外部访问和云端 PostgreSQL 重启由主控另验，不计入本报告独立范围。手机检查为 390×844 浏览器视口，不是真机。费用未知。
+本轮实际门户应用修复版 `9ef1511` 在主控 `1071461` 的本地 8080 打包服务中运行。CI/Codespaces、外部访问和云端 PostgreSQL 重启由主控另验，不计入本报告独立范围。手机检查为 390×844 浏览器视口，不是真机。真实归档来源为 10 月 12 日浏览器运行，最终回放验收执行于 10 月 13 日；未把旧采集声称为本轮新采集。费用未知。
 
 ## 已实际执行
 
@@ -49,7 +51,7 @@
 - 真实资源版本：Chromium `156.0.8078.4`、Firefox `157.0`。三条运行均保留实际通过用例和实际 expectText 断言失败用例；原始运行与矩阵仍 FAILED。
 - 主控真实已审批 HTTP harness 的临时 8094 页面已经 finally 关闭，不称为长期在线演示。本验收者独立重读它们的归档记录与媒体，没有冒称由自己创建这些真实运行。
 
-## 门户实测与待修复发现
+## 初轮门户实测与历史发现
 
 实际点击失败步骤后，三份真实 Chromium/Firefox 录像分别暂停于 `3.141`、`3.131`、`3.260` 秒，等于失败步骤 finishedAt 减录制 capture.startedAt，metadata.duration 分别 `5.04`、`5.04`、`4.24` 秒。较早通过步骤、截图采集时点、恢复首个失败点、通过 case 和切换 case 后均按真实时刻定位，显示“约”。真实视频 controls 可键盘空格播放/暂停。
 
@@ -57,6 +59,23 @@
 
 切换 case 释放旧媒体 Object URL；显式延迟实际证据响应的竞态 fixture 证明旧请求中止，完成后的媒体仍属于新 case。VIEWER 实际回放成功、无取消控制、创建/取消 403，匿名证据请求 401。明确 synthetic 的损坏 PNG/video 上传显示损坏错误与重试，两个重试均实际重新请求媒体；显式 HTTP403 媒体响应 fixture 显示错误并可在解除拦截后恢复截图。fixture 的媒体从不计入真实浏览器采集。
 
-待修复 `[P2] VideoTrack 解码错误后的重试不恢复`：只拦截真实 `evidence-c135d798-8ff0-4d09-bc3c-a4ab3fc96b5c` 首次 HTTP200，返回明确 synthetic 损坏 WebM 字节；实际页面显示损坏错误。解除该单响应拦截并点击“重试”，平台重新返回有效录像 Blob，但 `<video>` 数量仍 0，错误状态持续。`frontend/src/timeline.jsx` 的 onRetry 只更新 fetch reloadKey；decodeError 未清且阻止 `<video>` 渲染，所以新录像不能触发 loadedmetadata 清错。已交主控转原 Kimi 作者修复，验收者未代改实现。
+历史发现 `[P2] VideoTrack 解码错误后的重试不恢复`（最终版独立复测已关闭）：初轮只拦截真实 `evidence-c135d798-8ff0-4d09-bc3c-a4ab3fc96b5c` 首次 HTTP200，返回明确 synthetic 损坏 WebM 字节；实际页面显示损坏错误。解除该单响应拦截并点击“重试”，平台重新返回有效录像 Blob，但 `<video>` 数量仍 0，错误状态持续。`frontend/src/timeline.jsx` 的 onRetry 当时只更新 fetch reloadKey；decodeError 未清且阻止 `<video>` 渲染，所以新录像不能触发 loadedmetadata 清错。该发现交主控转原 Kimi 作者修复，验收者未代改实现。
 
 可复现证据：`.data/timeline-independent/synthetic-video-decode-before-retry.png`、`synthetic-video-decode-after-retry.png` 及 `ui-results.json`。其余截图为 `real-failure-desktop.png`、`real-failure-mobile.png`、`real-firefox-failure-*.png`、`viewer-real-failure-mobile.png`、`legacy-fallback.png`、`synthetic-damaged-media.png`、`synthetic-media-403.png`。
+
+## 最终修复独立验收
+
+本轮先只读核对规格、历史脚本与结果、`9ef1511` 实际 diff，再等主控确认最终 8080 已就绪。修复将录像解码错误绑定到其 Object URL，重试同时清理旧 metadata 和 seek 提示；独立验收针对其实际浏览器行为执行，没有修改生产代码或放宽规格。原 `ui.mjs`、`ui-results.json` 和历史截图均保留；本轮使用 `ui-final.mjs`、`ui-final-results.json` 与 `final-*.png`。
+
+- `node --check .data/timeline-independent/ui-final.mjs`：退出 0。
+- `node --test frontend/src/utils.test.js frontend/src/matrixUtils.test.js frontend/src/gateUtils.test.js frontend/src/timelineUtils.test.js`：本轮独立退出 0，43/43 源函数测试通过，包括新增录像解码状态按 URL 失效的场景；实际 TAP 保存为 `frontend-final-tests.txt`。这组函数测试与实际媒体恢复分别记录。
+- `TIMELINE_PORTAL_READY=true TIMELINE_REAL_RUN_IDS=[.data/timeline-local-result.json 的三个实际 runId] node .data/timeline-independent/ui-final.mjs`：最终退出 0，178/178、0 发现、13 次真实视频位置检查、10 张截图、0 未捕获 JavaScript 错误，约 5.75 秒。旧有效 UI 146 项的场景名称全部包含在本轮检查内。本轮增加实际原生 media error/loadedmetadata/seeked 事件、重试响应与显示 Blob 的字节哈希、旧 Blob 释放等检查。
+- 首轮新增网络测量退出 1，178 项中 176 通过：Playwright `response.body()` 返回 0 字节，而同次页面实际显示 Blob 的 38912 字节与归档 SHA 已一致，metadata、seek 和 paused 均恢复。保留 `ui-final-first-results.json`；改为筛选 GET 并记录应用真实 fetch 的克隆响应后，以上相同字节检查全部通过。没有修改实现，也未把该测量问题归为产品缺陷。
+
+本轮明确 synthetic 的一次损坏 WebM 响应共 71 字节、只拦截 1 次 HTTP200，触发真实原生 `MediaError.code=4`，错误与重试控件可见，损坏视频卸载且没有旧 duration/seek 提示。解除该响应拦截后实际点击“重试”，应用 GET200 克隆响应及显示视频 Blob 都为 38912 字节，SHA256 均为 `0517187c22a81a1705b44e59a1334578ed003062013379665832ad664db81700`，与本轮独立重新下载的实际归档一致。新 Blob 触发 `loadedmetadata.duration=5.04`、`seeked.currentTime=3.141`，`paused=true`、`readyState=4`、`controls=true`、`error=null`；实际位置等于失败步骤 finishedAt 减录像 capture.startedAt，错误控件消失，旧损坏 Blob URL 已释放。此证据关闭原 `[P2]`。
+
+完整复跑也核对首个 FAILED 默认选择、实际失败/通过步骤与截图点击、切换 case 与延迟响应取消、原三个报告 tab、两份 JUnit 和 trace 字节、原生键盘播放/暂停、真实 Chromium/Firefox 归档、历史无时间 fallback、空媒体/损坏 PNG 和录像/HTTP403 fixtures、VIEWER 回放与写入 403。三份实际失败录像仍分别定位 `3.141`、`3.131`、`3.260` 秒，duration 为 `5.04`、`5.04`、`4.24` 秒；近邻截图 SHA 和 case 窗口内原 ISO 日志匹配。
+
+桌面 1440×1000 与 390×844 的实际页面宽度检查通过，四轨互不覆盖；本验收者实际打开 `final-real-failure-desktop.png`、原分辨率 `final-real-failure-mobile.png` 及 `final-synthetic-video-decode-after-retry.png` 核对截图。所有 10 张本轮图片与原生事件/媒体状态保存在 `ui-final-results.json`，执行、退出、输入提交与文件 SHA 记录在 `final-execution.json`。
+
+原 122 API fixtures、297 来源、300 重启、18 旧门禁兼容结果是前轮实际记录，本轮只读复核其存在与计数，没有因门户修复重跑未变化的 API 全套。最终 verified 仅覆盖上述本地独立范围；CI、Codespaces 发布及云端保留由主控分别验证。交接完成后由主控提交本报告，本验收者不提交、不 push。
